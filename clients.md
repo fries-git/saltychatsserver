@@ -43,5 +43,6 @@ Accessible here: https://originchats.mistium.com/
 | timeouts            |        | yes              | yes            |       |              |
 | server leaving      |        | yes              | yes            |       | yes          |
 | voice calling       |        |                  |                |       | yes          |
+| platform            | web    | electron         | originOS       | web   | web          |
 
 Table created with https://www.tablesgenerator.com/markdown_tables

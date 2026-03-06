@@ -534,6 +534,7 @@ async def handle(ws, message, server_data=None):
                 channel_name = message.get("channel")
                 start = message.get("start", 0)
                 limit = message.get("limit", 100)
+                end = start + limit
 
                 if not channel_name:
                     return _error("Invalid channel name", match_cmd)
@@ -548,7 +549,7 @@ async def handle(ws, message, server_data=None):
                 messages = channels.get_channel_messages(channel_name, start, limit)
                 # Convert user IDs to usernames before sending
                 messages = channels.convert_messages_to_user_format(messages)
-                return {"cmd": "messages_get", "channel": channel_name, "messages": messages}
+                return {"cmd": "messages_get", "channel": channel_name, "messages": messages, "range": {"start": start, "end": end}}
             case "message_get":
                 # Handle request for a specific message by ID
                 channel_name = message.get("channel")

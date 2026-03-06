@@ -30,25 +30,42 @@ async def heartbeat(ws, heartbeat_interval=30):
 
 async def broadcast_to_all(connected_clients, message):
     """Broadcast a message to all connected clients"""
+    return await broadcast_to_all_except(connected_clients, message, None)
+
+async def broadcast_to_all_except(connected_clients, message, except_client):
+    """Broadcast a message to all connected clients except the specified client"""
+    from db import channels
+
     disconnected = set()
-    # Create a copy of the set to avoid "Set changed size during iteration" error
+
     clients_copy = connected_clients.copy()
     for ws in clients_copy:
+        if ws == except_client:
+            continue
+        if not getattr(ws, 'authenticated', False):
+            continue
+        user_id = getattr(ws, 'user_id', None)
+        if user_id is None:
+            continue
         success = await send_to_client(ws, message)
         if not success:
             disconnected.add(ws)
-    
+
     # Clean up disconnected clients
     for ws in disconnected:
-        connected_clients.discard(ws)  # Use discard instead of remove to avoid KeyError
-    
+        connected_clients.discard(ws)
+
     if disconnected:
         Logger.delete(f"Removed {len(disconnected)} disconnected clients")
-    
+
     return disconnected
 
-async def broadcast_to_channel(connected_clients, message, channel_name):
+async def broadcast_to_channel(connected_clients, message, channel_name) -> set:
     """Broadcast a message to all connected clients who have access to the specified channel"""
+    return await broadcast_to_channel_except(connected_clients, message, channel_name, None)
+
+async def broadcast_to_channel_except(connected_clients, message, channel_name, except_client):
+    """Broadcast a message to all connected clients who have access to the specified channel except the specified client"""
     from db import channels
     
     disconnected = set()
@@ -57,6 +74,9 @@ async def broadcast_to_channel(connected_clients, message, channel_name):
     clients_copy = connected_clients.copy()
     
     for ws in clients_copy:
+        if ws == except_client:
+            continue
+
         if not getattr(ws, 'authenticated', False):
             continue
             

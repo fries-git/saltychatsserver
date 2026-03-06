@@ -1,5 +1,5 @@
 import asyncio, websockets, json, os
-from handlers.websocket_utils import send_to_client, heartbeat, broadcast_to_all, broadcast_to_channel, broadcast_to_voice_channel, broadcast_to_voice_channel_with_viewers
+from handlers.websocket_utils import send_to_client, heartbeat, broadcast_to_all, broadcast_to_all_except, broadcast_to_channel_except, broadcast_to_voice_channel_with_viewers
 from handlers.auth import handle_authentication
 from handlers import message as message_handler
 from handlers.rate_limiter import RateLimiter
@@ -122,15 +122,19 @@ class OriginChatsServer:
                         # Check if this is a channel-specific message
                         if response.get("channel"):
                             # Broadcast only to users who have access to the channel
-                            await broadcast_to_channel(self.connected_clients, response, response["channel"])
+                            await broadcast_to_channel_except(self.connected_clients, response, response["channel"], websocket)
                         else:
                             # Broadcast to all clients if no channel specified
-                            await broadcast_to_all(self.connected_clients, response)
+                            await broadcast_to_all_except(self.connected_clients, response, websocket)
+                        
+                        if listener:
+                            response["listener"] = listener
+                        await send_to_client(websocket, response)
                         continue
-                    
+
                     if response:
                         if listener:
-                            response.listener = listener
+                            response["listener"] = listener
                         await send_to_client(websocket, response)
 
                 except json.JSONDecodeError:

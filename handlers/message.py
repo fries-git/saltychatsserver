@@ -1,9 +1,10 @@
-from db import channels, users, roles
+from db import channels, users, roles, serverEmojis
 import time, uuid, sys, os, asyncio, json
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logger import Logger
 from pydantic import ValidationError
 from schemas.slash_command_schema import SlashCommand
+from schemas.server_emoji_schema import Emoji_add, Emoji_delete, Emoji_get_all, Emoji_update, Emoji_get_filename, Emoji_get_id
 from handlers.websocket_utils import broadcast_to_voice_channel_with_viewers
 
 
@@ -1560,5 +1561,110 @@ async def handle(ws, message, server_data=None):
 
                 banned_users = users.get_banned_users()
                 return {"cmd": "users_banned_list", "users": banned_users}
+            case "emoji_add":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+                if error:
+                    return error
+                
+                try:
+                    emoji_add_command = Emoji_add.model_validate(message)
+                    emoji_id = serverEmojis.add_emoji(emoji_add_command.name, emoji_add_command.image)
+                    if (emoji_id):
+                        return {"cmd": "emoji_add", "id": emoji_id, "added": True}
+                    else:
+                        return _error(f"Error adding emoji", match_cmd)
+                except ValidationError as e:
+                    return _error(f"Invalid emoji_add command scheme: {str(e)}", match_cmd)
+            case "emoji_delete":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+                if error:
+                    return error
+                
+                try:
+                    emoji_delete_command = Emoji_delete.model_validate(message)
+                    deleted = serverEmojis.remove_emoji(emoji_delete_command.emoji_id, True)
+                    return {"cmd": "emoji_delete", "id": emoji_delete_command.emoji_id, "deleted": deleted}
+                except ValidationError as e:
+                    return _error(f"Invalid emoji_delete command scheme: {str(e)}", match_cmd)
+            case "emoji_get_all":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+                if error:
+                    return error
+
+                try:
+                    Emoji_get_all.model_validate(message)
+                    all_emojis = serverEmojis.get_emojis()
+                    return {"cmd": "emoji_get_all", "emojis": all_emojis}
+                except ValidationError as e:
+                    return _error(f"Invalid emoji_get_all command scheme: {str(e)}", match_cmd)
+            case "emoji_update":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+                if error:
+                    return error
+
+                try:
+                    emoji_update_command = Emoji_update.model_validate(message)
+                    updates = {}
+                    if emoji_update_command.name is not None:
+                        updates["name"] = emoji_update_command.name
+                    if emoji_update_command.image is not None:
+                        updates["fileName"] = str(emoji_update_command.image)
+
+                    if not updates:
+                        return _error("At least one field to update is required (name or image)", match_cmd)
+
+                    updated = serverEmojis.update_emoji(emoji_update_command.emoji_id, updates)
+                    return {"cmd": "emoji_update", "id": emoji_update_command.emoji_id, "updated": updated}
+                except ValidationError as e:
+                    return _error(f"Invalid emoji_update command scheme: {str(e)}", match_cmd)
+            case "emoji_get_filename":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+                if error:
+                    return error
+
+                try:
+                    emoji_get_filename_command = Emoji_get_filename.model_validate(message)
+                    emoji_id = serverEmojis.get_emoji_id_by_name(emoji_get_filename_command.name)
+                    if emoji_id is None:
+                        return _error("Emoji not found", match_cmd)
+
+                    file_path = serverEmojis.get_emoji_file_path(emoji_id)
+                    if not file_path:
+                        return _error("Emoji file not found", match_cmd)
+
+                    return {"cmd": "emoji_get_filename", "name": emoji_get_filename_command.name, "filepath": file_path}
+                except ValidationError as e:
+                    return _error(f"Invalid emoji_get_filename command scheme: {str(e)}", match_cmd)
+            case "emoji_get_id":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+                if error:
+                    return error
+
+                try:
+                    emoji_get_id_command = Emoji_get_id.model_validate(message)
+                    emoji_id = serverEmojis.get_emoji_id_by_name(emoji_get_id_command.name)
+                    if emoji_id is None:
+                        return _error("Emoji not found", match_cmd)
+                    return {"cmd": "emoji_get_id", "name": emoji_get_id_command.name, "id": emoji_id}
+                except ValidationError as e:
+                    return _error(f"Invalid emoji_get_id command scheme: {str(e)}", match_cmd)
             case _:
                 return _error(f"Unknown command: {message.get('cmd')}", match_cmd)

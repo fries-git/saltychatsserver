@@ -53,7 +53,11 @@ class UserCommands:
             return handler.error("Usage: ban <username>")
         
         username = args[0]
-        if users.ban_user(username):
+        user_id = users.get_id_by_username(username)
+        if not user_id:
+            return handler.error(f"User '{username}' not found")
+        
+        if users.ban_user(user_id):
             if handler.server_data and "connected_clients" in handler.server_data:
                 from handlers.websocket_utils import disconnect_user
                 loop = asyncio.get_event_loop()
@@ -78,7 +82,11 @@ class UserCommands:
             return handler.error("Usage: unban <username>")
         
         username = args[0]
-        if users.unban_user(username):
+        user_id = users.get_id_by_username(username)
+        if not user_id:
+            return handler.error(f"User '{username}' not found")
+        
+        if users.unban_user(user_id):
             handler.success(f"Unbanned user '{username}'")
         else:
             handler.error(f"Failed to unban '{username}'")

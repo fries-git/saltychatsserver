@@ -100,6 +100,14 @@ class OriginChatsServer:
         """
         Serve HTTP emoji assets on the same socket as WebSocket traffic.
         """
+        upgrade = request.headers.get("Upgrade", "")
+        connection_hdr = request.headers.get("Connection", "")
+        connection_tokens = {token.strip().lower() for token in connection_hdr.split(",") if token.strip()}
+        is_websocket_upgrade = upgrade.lower() == "websocket" and "upgrade" in connection_tokens
+        if is_websocket_upgrade:
+            # Let websockets handle normal WS handshakes.
+            return None
+
         path = urlsplit(request.path).path
         if path in ("/", "/index.html"):
             index_path = os.path.join(os.path.dirname(__file__), "index.html")
@@ -113,7 +121,12 @@ class OriginChatsServer:
             return self._serve_file_response(index_path, cache_control="no-cache")
 
         if not path.startswith("/emojis/"):
-            return None
+            return Response(
+                404,
+                "Not Found",
+                Headers([("Content-Type", "text/plain; charset=utf-8")]),
+                b"Not found",
+            )
 
         file_name = unquote(path[len("/emojis/"):]).strip()
         file_path = self._resolve_emoji_file_path(file_name)

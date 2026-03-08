@@ -302,7 +302,11 @@ class RoleCommands:
             return handler.error("Usage: give <username> <role>")
         
         username, role_name = args[0], args[1]
-        if users.give_role(username, role_name):
+        user_id = users.get_id_by_username(username)
+        if not user_id:
+            return handler.error(f"User '{username}' not found")
+        
+        if users.give_role(user_id, role_name):
             handler.success(f"Gave role '{role_name}' to '{username}'")
         else:
             handler.error(f"Failed to give role")
@@ -320,7 +324,11 @@ class RoleCommands:
             return handler.error("Usage: remove [username] [role]")
         
         username, role_name = args[0], args[1]
-        if users.remove_role(username, role_name):
+        user_id = users.get_id_by_username(username)
+        if not user_id:
+            return handler.error(f"User '{username}' not found")
+        
+        if users.remove_role(user_id, role_name):
             handler.success(f"Removed role '{role_name}' from '{username}'")
         else:
             handler.error(f"Failed to remove role")

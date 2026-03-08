@@ -1,8 +1,12 @@
-import asyncio, websockets, json, os
+import asyncio, websockets, json, os, mimetypes
+from urllib.parse import urlsplit, unquote
+from websockets.datastructures import Headers
+from websockets.http11 import Response
 from handlers.websocket_utils import send_to_client, heartbeat, broadcast_to_all, broadcast_to_all_except, broadcast_to_channel_except, broadcast_to_voice_channel_with_viewers
 from handlers.auth import handle_authentication
 from handlers import message as message_handler
 from handlers.rate_limiter import RateLimiter
+from db import serverEmojis
 import watchers
 from plugin_manager import PluginManager
 from logger import Logger
@@ -44,7 +48,98 @@ class OriginChatsServer:
             Logger.info(f"Rate limiting enabled: {rate_config.get('messages_per_minute', 30)} msg/min, burst: {rate_config.get('burst_limit', 5)}")
         else:
             Logger.warning("Rate limiting disabled")
-    
+
+    def _resolve_emoji_file_path(self, file_name):
+        """
+        Resolve and validate custom emoji file path in db/serverEmojis.
+        Returns absolute file path or None when invalid/missing.
+        """
+        if not file_name:
+            return None
+
+        if file_name != os.path.basename(file_name) or file_name.startswith("."):
+            return None
+
+        if not serverEmojis.is_allowed_file_type(file_name):
+            return None
+
+        emoji_dir = os.path.join(os.path.dirname(__file__), "db", "serverEmojis")
+        file_path = os.path.normpath(os.path.join(emoji_dir, file_name))
+        emoji_dir_norm = os.path.normpath(emoji_dir)
+
+        if not file_path.startswith(emoji_dir_norm + os.sep):
+            return None
+
+        if not os.path.isfile(file_path):
+            return None
+
+        return file_path
+
+    def _serve_file_response(self, file_path, cache_control="public, max-age=3600"):
+        with open(file_path, "rb") as f:
+            body = f.read()
+
+        content_type, _ = mimetypes.guess_type(file_path)
+        if not content_type:
+            content_type = "application/octet-stream"
+
+        return Response(
+            200,
+            "OK",
+            Headers(
+                [
+                    ("Content-Type", content_type),
+                    ("Content-Length", str(len(body))),
+                    ("Cache-Control", cache_control),
+                ]
+            ),
+            body,
+        )
+
+    async def _process_http_request(self, connection, request):
+        """
+        Serve HTTP emoji assets on the same socket as WebSocket traffic.
+        """
+        upgrade = request.headers.get("Upgrade", "")
+        connection_hdr = request.headers.get("Connection", "")
+        connection_tokens = {token.strip().lower() for token in connection_hdr.split(",") if token.strip()}
+        is_websocket_upgrade = upgrade.lower() == "websocket" and "upgrade" in connection_tokens
+        if is_websocket_upgrade:
+            # Let websockets handle normal WS handshakes.
+            return None
+
+        path = urlsplit(request.path).path
+        if path in ("/", "/index.html"):
+            index_path = os.path.join(os.path.dirname(__file__), "index.html")
+            if not os.path.isfile(index_path):
+                return Response(
+                    404,
+                    "Not Found",
+                    Headers([("Content-Type", "text/plain; charset=utf-8")]),
+                    b"index.html not found",
+                )
+            return self._serve_file_response(index_path, cache_control="no-cache")
+
+        if not path.startswith("/emojis/"):
+            return Response(
+                404,
+                "Not Found",
+                Headers([("Content-Type", "text/plain; charset=utf-8")]),
+                b"Not found",
+            )
+
+        file_name = unquote(path[len("/emojis/"):]).strip()
+        file_path = self._resolve_emoji_file_path(file_name)
+        if not file_path:
+            return Response(
+                404,
+                "Not Found",
+                Headers([("Content-Type", "text/plain; charset=utf-8")]),
+                b"Emoji not found",
+            )
+
+        return self._serve_file_response(file_path, cache_control="public, max-age=3600")
+
     async def handle_client(self, websocket):
         """WebSocket connection handler"""
         # Get client info
@@ -215,7 +310,13 @@ class OriginChatsServer:
         self.plugin_manager.trigger_event("server_start", None, {}, server_data)
         
         try:
-            async with websockets.serve(self.handle_client, host, port, ping_interval=None):
+            async with websockets.serve(
+                self.handle_client,
+                host,
+                port,
+                ping_interval=None,
+                process_request=self._process_http_request,
+            ):
                 Logger.success(f"WebSocket server running at ws://{host}:{port}")
                 
                 # Keep the server running

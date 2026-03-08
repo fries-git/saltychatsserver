@@ -164,6 +164,7 @@ For full configuration details, see [Data Structures: Config](data/config.md).
 - [User Object](data/user.md) - User data structure
 - [Channel Object](data/channels.md) - Channel configuration, permissions, and voice state
 - [Message Object](data/messages.md) - Message structure with replies and reactions
+- [Emoji Object](data/emojis.md) - Custom emoji metadata and collection format
 - [Role Object](data/roles.md) - Role definitions and colors
 - [Config Schema](data/config.md) - Server configuration options
 - [Permissions System](data/permissions.md) - How role-based permissions work

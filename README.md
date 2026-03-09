@@ -19,7 +19,7 @@ A WebSocket-based real-time chat server with voice channels, slash commands, rol
    ```
 
 2. **Configure:**
-   - Edit `config.json` for server settings
+   - Run `python setup.py` to generate `config.json`, or edit it manually
    - Set up Rotur authentication service
 
 3. **Run:**
@@ -82,12 +82,16 @@ Key settings in `config.json`:
     "cooldown_seconds": 60
   },
   "limits": {
-    "post_content": 2000
+    "post_content": 2000,
+    "search_results": 30
+  },
+  "uploads": {
+    "emoji_allowed_file_types": ["gif", "jpg", "jpeg", "png"]
   }
 }
 ```
 
-See [Config Schema](docs/data/config.md) for full configuration options.
+See [Config Schema](docs/config.md) for full configuration options.
 
 ## Rate Limiting
 
@@ -171,6 +175,14 @@ See `plugins/` directory for examples. Plugins can:
 - Handle slash commands
 - Modify message data
 - Trigger events
+
+### Adding Config Values
+
+Use the same 3-step flow throughout the codebase:
+
+1. Add the default in `config_builder.py`.
+2. If it should be configurable during setup, prompt for it in `setup.py` and pass it into `build_config(...)`.
+3. Read it with `get_config_value(...)` from `config_store.py`, or use the local handler helper when `server_data["config"]` is already available.
 
 ## API Protocol
 

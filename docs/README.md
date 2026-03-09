@@ -33,7 +33,7 @@ OriginChats is a real-time WebSocket chat server built in Python. It supports te
    ```
 
 2. **Configuration:**
-   - Edit `config.json` for server settings
+   - Run `python setup.py` to generate `config.json`, or edit it manually
    - Configure Rotur authentication service
 
 3. **Start the Server:**
@@ -60,12 +60,22 @@ Key configuration options in `config.json`:
     "messages_per_minute": 30
   },
   "limits": {
-    "post_content": 2000
+    "post_content": 2000,
+    "search_results": 30
+  },
+  "uploads": {
+    "emoji_allowed_file_types": ["gif", "jpg", "jpeg", "png"]
   }
 }
 ```
 
-For full configuration details, see [Data Structures: Config](data/config.md).
+For full configuration details, see [Configuration](config.md).
+
+To add a new config value:
+
+1. Add the default in `config_builder.py`.
+2. If it should be configurable during setup, prompt for it in `setup.py` and pass it into `build_config(...)`.
+3. Read it with `get_config_value(...)` from `config_store.py`, or use the local handler helper when `server_data["config"]` is already available.
 
 ---
 
@@ -222,4 +232,4 @@ For issues, questions, or contributions:
 
 ---
 
-**Last Updated:** 2025-02-16
+**Last Updated:** 2026-03-09

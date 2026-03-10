@@ -114,7 +114,7 @@ class OriginChatsServer:
         return f"http://{host}:{port}"
 
     def _join_public_url(self, path):
-        return f"{self._normalize_public_base_url().rstrip('/')}/{path.lstrip('/')}"
+        return f"https://{self._normalize_public_base_url().rstrip('/')}/{path.lstrip('/')}"
 
     def _resolve_server_asset_path(self, file_path):
         if not file_path or not isinstance(file_path, str):

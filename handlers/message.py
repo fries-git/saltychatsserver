@@ -5,7 +5,7 @@ from logger import Logger
 from pydantic import ValidationError
 from schemas.slash_command_schema import SlashCommand
 from schemas.server_emoji_schema import Emoji_add, Emoji_delete, Emoji_get_all, Emoji_update, Emoji_get_filename, Emoji_get_id
-from handlers.websocket_utils import broadcast_to_voice_channel_with_viewers
+from handlers.websocket_utils import broadcast_to_voice_channel_with_viewers, broadcast_to_all
 
 
 def _error(error_message, match_cmd):
@@ -869,7 +869,6 @@ async def handle(ws, message, server_data=None):
                 server_data["rate_limiter"].reset_user(target_id)
                 return {"cmd": "rate_limit_reset", "user": target_display, "val": f"Rate limit reset for user {target_display}"}
             case "slash_register":
-                # Handle slash command registration
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
                     return error
@@ -877,27 +876,57 @@ async def handle(ws, message, server_data=None):
                 user_roles, error = _require_user_roles(user_id)
                 if error:
                     return error
-                
+
                 commands = message.get("commands")
                 if not commands or not isinstance(commands, list):
                     return _error("Commands must be provided as a list", match_cmd)
-                
+
                 if not server_data:
                     return _error("No server data provided", match_cmd)
-                
-                # Validate and register each command
+
+                slash_commands = server_data["slash_commands"]
+                connected_clients = server_data.get("connected_clients")
+
+                username = users.get_username_by_id(user_id)
+
+                for client_ws in connected_clients:
+                    if client_ws != ws and getattr(client_ws, "user_id") == user_id:
+                        return _error("You already have slash commands registered from another session", match_cmd)
+
+                slash_commands[id(ws)] = {}
+
+                registered_commands = []
                 for cmd in commands:
                     try:
                         validatedCommand = SlashCommand.model_validate(cmd)
                     except ValidationError as e:
                         return _error(f"Invalid command schema: {str(e)}", match_cmd)
-                    
-                    server_data["slash_commands"][validatedCommand.name] = validatedCommand
-                    Logger.info(f"Registered slash command: {validatedCommand.name}")
-                
+
+                    command_data = {
+                        "command": validatedCommand,
+                        "user_id": user_id,
+                        "username": username
+                    }
+                    slash_commands[id(ws)][validatedCommand.name] = command_data
+                    Logger.info(f"Registered slash command for user {username} ({user_id}): {validatedCommand.name}")
+                    registered_commands.append({
+                        "name": validatedCommand.name,
+                        "description": validatedCommand.description,
+                        "options": [opt.model_dump() for opt in validatedCommand.options],
+                        "whitelistRoles": validatedCommand.whitelistRoles,
+                        "blacklistRoles": validatedCommand.blacklistRoles,
+                        "ephemeral": validatedCommand.ephemeral,
+                        "registeredBy": username
+                    })
+
+                if connected_clients and registered_commands:
+                    await broadcast_to_all(connected_clients, {
+                        "cmd": "slash_add",
+                        "commands": registered_commands
+                    })
+
                 return {"cmd": "slash_register", "val": f"{len(commands)} commands registered successfully"}
             case "slash_list":
-                # Handle request for list of slash commands
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
                     return error
@@ -905,58 +934,28 @@ async def handle(ws, message, server_data=None):
                 user_roles, error = _require_user_roles(user_id)
                 if error:
                     return error
-                
+
                 if not server_data:
                     return _error("No server data provided", match_cmd)
-                
-                command_lines = []
-                for cmd in server_data["slash_commands"].values():
-                    options_str = (
-                        "\n".join(
-                            f"    • {opt.name} ({opt.type})"
-                            f"{' [required]' if opt.required else ''}"
-                            f"{f' choices={opt.choices}' if opt.choices else ''}"
-                            f": {opt.description}"
-                            for opt in cmd.options
-                        )
-                        if cmd.options
-                        else "    • No options"
-                    )
-                    
-                    whitelist_str = (
-                        f"  Whitelist roles: {', '.join(cmd.whitelistRoles)}"
-                        if cmd.whitelistRoles
-                        else "  Whitelist roles: None"
-                    )
 
-                    blacklist_str = (
-                        f"  Blacklist roles: {', '.join(cmd.blacklistRoles)}"
-                        if cmd.blacklistRoles
-                        else "  Blacklist roles: None"
-                    )
-                    
-                    ephemeral_str = f"  Ephemeral: {'Yes' if cmd.ephemeral else 'No'}"
+                slash_commands = server_data["slash_commands"]
+                commands_list = []
 
-                    command_lines.append(
-                        f"/{cmd.name}\n"
-                        f"  {cmd.description}\n"
-                        f"{whitelist_str}\n"
-                        f"{blacklist_str}\n"
-                        f"{options_str}"
-                        f"\n{ephemeral_str}"
-                    )
+                for ws_id, commands in slash_commands.items():
+                    for cmd_name, cmd_data in commands.items():
+                        command_obj = cmd_data["command"]
+                        commands_list.append({
+                            "name": command_obj.name,
+                            "description": command_obj.description,
+                            "options": [opt.model_dump() for opt in command_obj.options],
+                            "whitelistRoles": command_obj.whitelistRoles,
+                            "blacklistRoles": command_obj.blacklistRoles,
+                            "ephemeral": command_obj.ephemeral,
+                            "registeredBy": cmd_data["username"]
+                        })
 
-                    command_lines.append(
-                        f"/{cmd.name}\n"
-                        f"  {cmd.description}\n"
-                        f"{options_str}"
-                    )
-
-                msg = f"Registered Slash Commands ({len(command_lines)}):\n\n" + "\n\n".join(command_lines)
-
-                return {"cmd": "slash_list", "val": msg}
+                return {"cmd": "slash_list", "commands": commands_list}
             case "slash_call":
-                # Handle request to call a slash command
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
                     return error
@@ -964,15 +963,14 @@ async def handle(ws, message, server_data=None):
                 user_roles, error = _require_user_roles(user_id)
                 if error:
                     return error
-                
+
                 if not server_data:
                     return _error("No server data provided", match_cmd)
-                
+
                 channel = message.get("channel")
                 if not channel:
                     return _error("Channel parameter is required for slash commands", match_cmd)
-                
-                # Verify command existence
+
                 cmd_name = message.get("command")
                 args = message.get("args", {})
                 if not isinstance(args, dict):
@@ -981,37 +979,69 @@ async def handle(ws, message, server_data=None):
                 if not isinstance(cmd_name, str):
                     return _error("Command name must be a string", match_cmd)
 
-                command = server_data["slash_commands"].get(cmd_name)
-                if not command:
+                slash_commands = server_data["slash_commands"]
+                command_data = None
+                for user_commands in slash_commands.values():
+                    if cmd_name in user_commands:
+                        command_data = user_commands[cmd_name]
+                        break
+
+                if not command_data:
                     return _error(f"Unknown slash command: /{cmd_name}", match_cmd)
 
-                # Verify perms
+                command = command_data["command"]
                 user_roles, error = _require_user_roles(user_id, requiredRoles=command.whitelistRoles or [], forbiddenRoles=command.blacklistRoles or [])
                 if error:
                     return error
-                
-                # Verify command shape
+
                 options = {option.name: option for option in command.options}
-                
+
                 for argument_name in args:
                     if argument_name not in options:
                         return _error(f"Unknown argument: {argument_name}", match_cmd)
-                
+
                 for option in command.options:
                     if option.required and option.name not in args:
                         return _error(f"Missing required argument: {option.name}", match_cmd)
-                    
-                # Validate types
+
                 for optionName, value in args.items():
                     option = options[optionName]
-                    
+
                     is_valid, error_message = _validate_option_value(optionName, value, option)
                     if not is_valid:
                         return {"cmd": "error", "val": error_message}
 
-                return {"cmd": "slash_call", "val": {"command": cmd_name, "args": args}, "invoker": user_id, "channel": channel, "global": True}
+                commander_user_id = command_data["user_id"]
+                invoker_username = users.get_username_by_id(user_id)
+
+                connected_clients = server_data.get("connected_clients", [])
+                commander_ws = None
+
+                for client_ws in connected_clients:
+                    if getattr(client_ws, "user_id", None) == commander_user_id:
+                        commander_ws = client_ws
+                        break
+
+                if not commander_ws:
+                    return _error(f"Command handler for /{cmd_name} is not currently connected", match_cmd)
+
+                slash_call_message = {
+                    "cmd": "slash_call",
+                    "val": {"command": cmd_name, "args": args, "commander": command_data["username"]},
+                    "invoker": user_id,
+                    "invokerUsername": invoker_username,
+                    "channel": channel
+                }
+
+                Logger.info(f"Sending slash_call to commander {commander_user_id} (username: {command_data['username']}) for command /{cmd_name}")
+
+                loop = asyncio.get_event_loop()
+                send_to_client_func = server_data.get("send_to_client")
+                if send_to_client_func:
+                    loop.create_task(send_to_client_func(commander_ws, slash_call_message))
+
+                return {"cmd": "slash_call_sent", "val": f"Command /{cmd_name} invoked"}
             case "slash_response":
-                # Handle response to a slash command
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
                     return error
@@ -1019,7 +1049,7 @@ async def handle(ws, message, server_data=None):
                 user_roles, error = _require_user_roles(user_id)
                 if error:
                     return error
-                
+
                 channel = message.get("channel")
                 if not channel:
                     return {"cmd": "error", "val": "Channel parameter is required for slash commands"}
@@ -1032,19 +1062,31 @@ async def handle(ws, message, server_data=None):
                 if not response:
                     return {"cmd": "error", "val": "Slash response cannot be empty"}
 
+                command = message.get("command")
+                if not command or not isinstance(command, str):
+                    return {"cmd": "error", "val": "Command parameter is required for slash responses"}
+
+                invoker_id = message.get("invoker") or user_id
+                invoker_username = users.get_username_by_id(invoker_id)
+
                 out_msg = {
-                    "user": message.get("invoker") or user_id,
+                    "user": user_id,
                     "content": response,
                     "timestamp": time.time(),
                     "type": "message",
                     "pinned": False,
-                    "id": str(uuid.uuid4())
+                    "id": str(uuid.uuid4()),
+                    "interaction": {
+                        "command": command,
+                        "username": invoker_username
+                    }
                 }
 
                 channels.save_channel_message(channel, out_msg)
                 out_msg_for_client = channels.convert_messages_to_user_format([out_msg])[0]
+                out_msg_for_client["interaction"] = out_msg["interaction"]
 
-                return {"cmd": "slash_response", "message": out_msg_for_client, "invoker": message.get("invoker"), "channel": channel, "global": True}
+                return {"cmd": "message_new", "message": out_msg_for_client, "channel": channel, "global": True}
             case "voice_join":
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:

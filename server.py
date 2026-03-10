@@ -242,18 +242,17 @@ class OriginChatsServer:
         except Exception as e:
             Logger.error(f"Error handling connection: {str(e)}")
         finally:
-            # Clean up
             heartbeat_task.cancel()
             if websocket in self.connected_clients:
                 self.connected_clients.remove(websocket)
                 Logger.delete(f"Client {client_ip} removed. {len(self.connected_clients)} clients remaining")
-                
+
                 username = getattr(websocket, "username", "")
-                
+
                 if getattr(websocket, "authenticated", False):
                     user_id = getattr(websocket, "user_id", None)
                     current_voice_channel = getattr(websocket, "voice_channel", None)
-                    
+
                     if user_id and current_voice_channel:
                         if current_voice_channel in self.voice_channels and user_id in self.voice_channels[current_voice_channel]:
                             msg = {"cmd": "voice_user_left", "channel": current_voice_channel, "username": username}
@@ -264,11 +263,22 @@ class OriginChatsServer:
                                 msg,
                                 current_voice_channel
                             )
-                            
+
                             del self.voice_channels[current_voice_channel][user_id]
-                            
+
                             if not self.voice_channels[current_voice_channel]:
                                 del self.voice_channels[current_voice_channel]
+
+                    ws_id = id(websocket)
+                    if ws_id in self.slash_commands:
+                        command_names = list(self.slash_commands[ws_id].keys())
+                        if command_names:
+                            await broadcast_to_all(self.connected_clients, {
+                                "cmd": "slash_remove",
+                                "commands": command_names
+                            })
+                            Logger.info(f"Removed {len(command_names)} slash commands for connection {ws_id}")
+                        del self.slash_commands[ws_id]
 
                 await broadcast_to_all(self.connected_clients, {
                     "cmd": "user_disconnect",

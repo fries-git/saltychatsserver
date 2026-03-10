@@ -23,6 +23,9 @@ def _patch_websockets_request_parse():
         except EOFError as exc:
             raise EOFError("connection closed while reading HTTP request line") from exc
 
+        # normalize potential bytearray
+        request_line = bytes(request_line)
+
         try:
             method, raw_path, protocol = request_line.split(b" ", 2)
         except ValueError:

@@ -108,7 +108,7 @@ class OriginChatsServer:
                 return "http://" + base_url[len("ws://"):].rstrip("/")
             if base_url.startswith("wss://"):
                 return "https://" + base_url[len("wss://"):].rstrip("/")
-            return base_url.rstrip("/")
+            return "https://" + base_url.rstrip("/")
 
         host = self.config.get("websocket", {}).get("host", "127.0.0.1")
         port = self.config.get("websocket", {}).get("port", 5613)

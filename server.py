@@ -134,9 +134,11 @@ class OriginChatsServer:
         return normalized_path
 
     def _register_server_asset(self, asset_name):
-        asset_value = self.config.get("server", {}).get(asset_name)
+        if "server" not in self.config:
+            return
+        
+        asset_value = self.config["server"].get(asset_name)
         if not asset_value or not isinstance(asset_value, str):
-            self.config.get("server", {}).pop(asset_name, None)
             return
 
         if "://" in asset_value:
@@ -146,7 +148,6 @@ class OriginChatsServer:
         asset_path = os.path.join(self.server_assets_dir, asset_name_only)
         if not os.path.isfile(asset_path):
             Logger.warning(f"Server {asset_name} asset missing in db/serverAssets: {asset_name_only}")
-            self.config.get("server", {}).pop(asset_name, None)
             return
 
         self.server_asset_files[asset_name] = asset_path

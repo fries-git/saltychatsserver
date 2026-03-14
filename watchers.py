@@ -69,9 +69,8 @@ class FileWatcher(FileSystemEventHandler):
     async def _handle_channels_change(self):
         """Handle channels.json file changes"""
         try:
-            # Load new channels data
-            with open(channels.channels_index, 'r') as f:
-                new_channels = json.load(f)
+            # Reload server's channel cache
+            new_channels = channels._load_channels_index()
             
             await self.broadcast_func({
                 "cmd": "channels_get",

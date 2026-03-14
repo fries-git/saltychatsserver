@@ -45,6 +45,9 @@ async def handle_authentication(websocket, data, config_data, connected_clients,
     if is_new_user:
         users.add_user(user_id, username)
         Logger.add(f"User {username} (ID: {user_id}) created")
+        websocket.user_roles = ["user"]
+    elif user:
+        websocket.user_roles = user.get("roles", [])
 
     # Update username if it has changed
     existing_user = users.get_user(user_id)

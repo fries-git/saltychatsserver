@@ -592,7 +592,7 @@ def delete_channel_message(channel_name, message_id):
         cache = _get_channel_cache(channel_name)
 
         if message_id not in cache["id_to_idx"]:
-            return True
+            return False
 
         new_messages = [m for m in cache["messages"] if m.get("id") != message_id]
         old_messages = cache["messages"]
@@ -981,7 +981,7 @@ def can_user_edit_own(channel_name, user_roles):
                     return True
                 allowed_roles = permissions.get("edit_own", [])
                 return any(role in allowed_roles for role in user_roles)
-    return False
+    return True
 
 def can_user_react(channel_name, user_roles):
     """
@@ -996,8 +996,7 @@ def can_user_react(channel_name, user_roles):
                     return True
                 allowed_roles = permissions.get("react", [])
                 return any(role in allowed_roles for role in user_roles)
-    return False
-
+    return True
 
 def add_reaction(channel_name, message_id, emoji_str, user_id):
     """

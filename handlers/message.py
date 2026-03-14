@@ -60,6 +60,133 @@ def _require_text_channel_access(user_id, channel_name):
     return user_data, None
 
 
+def extract_user_mentions(content, exclude_username=None):
+    """Extract @username mentions from message content.
+    
+    Args:
+        content: The message content to parse
+        exclude_username: Optional username to exclude from results
+        
+    Returns:
+        set: Set of mentioned usernames (without @ prefix)
+    """
+    mentioned = set(re.findall(r'(?<!&)@([a-zA-Z0-9_]+)', content))
+    if exclude_username:
+        mentioned.discard(exclude_username)
+    return mentioned
+
+
+def extract_role_mentions(content):
+    """Extract @&rolename mentions from message content.
+    
+    Args:
+        content: The message content to parse
+        
+    Returns:
+        set: Set of mentioned role names (without @& prefix)
+    """
+    return set(re.findall(r'@&([a-zA-Z0-9_]+)', content))
+
+
+def extract_all_pings(content):
+    """Extract all pings (user and role mentions) from message content.
+    
+    Args:
+        content: The message content to parse
+        
+    Returns:
+        tuple: (set of usernames, set of role names)
+    """
+    return extract_user_mentions(content), extract_role_mentions(content)
+
+
+def get_ping_patterns_for_user(username, user_roles):
+    """Generate all ping patterns that would notify a specific user.
+    
+    Args:
+        username: The username to generate patterns for
+        user_roles: List of role names the user has
+        
+    Returns:
+        list: List of patterns to check for pings
+    """
+    patterns = [
+        f"@{username}",
+        f"@{username}@",
+        f"@{username} "
+    ]
+    for role in user_roles:
+        patterns.append(f"@&{role}")
+        patterns.append(f"@&{role}@")
+        patterns.append(f"@&{role} ")
+    return patterns
+
+
+def check_ping_in_content(content, ping_patterns):
+    """Check if any ping pattern exists in content.
+    
+    Args:
+        content: The message content to check
+        ping_patterns: List of patterns to search for
+        
+    Returns:
+        bool: True if any pattern is found in content
+    """
+    for pattern in ping_patterns:
+        if pattern in content:
+            return True
+    return False
+
+
+def validate_role_mentions_permissions(content, sender_user_roles):
+    """Validate that the sender can mention the roles in the content.
+    
+    Args:
+        content: The message content to validate
+        sender_user_roles: List of roles the sender has
+        
+    Returns:
+        tuple: (is_valid, error_message). is_valid is True if all role mentions are allowed.
+    """
+    mentioned_roles = extract_role_mentions(content)
+    for mentioned_role in mentioned_roles:
+        if not roles.role_exists(mentioned_role):
+            continue
+        if not roles.can_role_mention_role(sender_user_roles, mentioned_role):
+            return False, f"You do not have permission to mention the '@&{mentioned_role}' role"
+    return True, None
+
+
+def get_message_pings(content, sender_user_roles):
+    """Get all valid pings from message content, respecting role mention permissions.
+    
+    This function extracts pings from content and filters out role mentions
+    that the sender doesn't have permission to use.
+    
+    Args:
+        content: The message content to parse
+        sender_user_roles: List of roles the message sender has
+        
+    Returns:
+        dict: Contains 'users' (set of usernames) and 'roles' (set of role names)
+              that were validly mentioned
+    """
+    mentioned_users = extract_user_mentions(content)
+    mentioned_roles = extract_role_mentions(content)
+    
+    valid_roles = set()
+    for role in mentioned_roles:
+        if roles.role_exists(role) and roles.can_role_mention_role(sender_user_roles, role):
+            valid_roles.add(role)
+        elif not roles.role_exists(role):
+            valid_roles.add(role)
+    
+    return {
+        "users": mentioned_users,
+        "roles": valid_roles
+    }
+
+
 def _get_thread_context(thread_id, user_id, user_roles, require_view=True):
     """Helper to validate thread access and return context. Returns (context_dict, error_response)."""
     thread_data = threads.get_thread(thread_id)
@@ -254,7 +381,6 @@ async def handle(ws, message, server_data=None):
                 if server_data and server_data.get("rate_limiter"):
                     is_allowed, reason, wait_time = server_data["rate_limiter"].is_allowed(user_id)
                     if not is_allowed:
-                        # Convert wait time to milliseconds and send rate_limit packet
                         wait_time_ms = int(wait_time * 1000)
                         return {"cmd": "rate_limit", "reason": reason, "length": wait_time_ms}
 
@@ -262,18 +388,10 @@ async def handle(ws, message, server_data=None):
                 if not user_roles:
                     return _error("User roles not found", match_cmd)
 
-                # Check message length limit from config
-                max_length = server_data.get("config", {}).get("limits", {}).get("post_content", 2000)
-                if len(content) > max_length:
-                    return _error(f"Message too long. Maximum length is {max_length} characters", match_cmd)
-
-                # Check role mention permissions
-                role_mentions = re.findall(r'@&([a-zA-Z0-9_]+)', content)
-                for mentioned_role in role_mentions:
-                    if not roles.role_exists(mentioned_role):
-                        continue
-                    if not roles.can_role_mention_role(user_roles, mentioned_role):
-                        return _error(f"You do not have permission to mention the '@&{mentioned_role}' role", match_cmd)
+                # Validate role mention permissions using centralized function
+                is_valid, error_msg = validate_role_mentions_permissions(content, user_roles)
+                if not is_valid:
+                    return _error(error_msg, match_cmd)
 
                 # Check if the user has permission to send messages in this channel
                 if thread_id:
@@ -341,7 +459,27 @@ async def handle(ws, message, server_data=None):
 
                 # Get username for plugin event
                 username = users.get_username_by_id(user_id)
+
+                # Calculate pings for the message using centralized function
+                pings = get_message_pings(content, user_roles)
                 
+                # Check if message is a reply with ping enabled
+                is_reply_ping = False
+                if reply_to and replied_message:
+                    reply_ping_enabled = message.get("ping", True)
+                    if reply_ping_enabled:
+                        original_author_id = replied_message.get("user")
+                        if original_author_id:
+                            original_author_user = users.get_user(original_author_id)
+                            if original_author_user:
+                                is_reply_ping = True
+                                pings.setdefault("replies", [])
+                                pings["replies"].append(original_author_id)
+
+                # Only add pings field if there are any pings
+                if pings.get("users") or pings.get("roles") or pings.get("replies"):
+                    out_msg_for_client["pings"] = pings
+
                 # Trigger new_message event for plugins
                 if server_data and "plugin_manager" in server_data:
                     server_data["plugin_manager"].trigger_event("new_message", ws, {
@@ -352,10 +490,8 @@ async def handle(ws, message, server_data=None):
                         "message": out_msg
                     }, server_data)
 
-                mentioned_usernames = set(re.findall(r'(?<!&)@([a-zA-Z0-9_]+)', content))
+                mentioned_usernames = extract_user_mentions(content, exclude_username=username)
                 for mentioned_username in mentioned_usernames:
-                    if mentioned_username == username:
-                        continue
                     if not push_handler.is_user_online(mentioned_username, server_data):
                         push_handler.send_push_notification(
                             username=mentioned_username,
@@ -394,7 +530,7 @@ async def handle(ws, message, server_data=None):
                     if not is_allowed:
                         # Convert wait time to milliseconds and send rate_limit packet
                         wait_time_ms = int(wait_time * 1000)
-                        return {"cmd": "rate_limit", "reason": reason, "wait_time": wait_time * 1000}
+                        return {"cmd": "rate_limit", "reason": reason, "length": wait_time_ms}
 
                 channel_name = message.get("channel")
                 if not channel_name:
@@ -457,7 +593,11 @@ async def handle(ws, message, server_data=None):
                         return _error(f"You do not have permission to edit your own message in this {'thread' if is_thread else 'channel'}", match_cmd)
                 else:
                     return _error("You do not have permission to edit this message", match_cmd)
-                
+
+                is_valid, error_msg = validate_role_mentions_permissions(new_content, user_roles)
+                if not is_valid:
+                    return _error(error_msg, match_cmd)
+
                 if is_thread and thread_id:
                     if not threads.edit_thread_message(thread_id, message_id, new_content):
                         return _error("Failed to edit message", match_cmd)
@@ -474,6 +614,9 @@ async def handle(ws, message, server_data=None):
                     edited_msg = threads.get_thread_message(thread_id, message_id)
                     if edited_msg:
                         edited_msg = threads.convert_messages_to_user_format([edited_msg])[0]
+                        pings = get_message_pings(new_content, user_roles)
+                        if pings.get("users") or pings.get("roles"):
+                            edited_msg["pings"] = pings
                     return {"cmd": "message_edit", "id": message_id, "content": new_content, "message": edited_msg, "channel": parent_channel, "thread_id": thread_id, "global": True}
                 else:
                     if not channels.edit_channel_message(channel_name, message_id, new_content):
@@ -482,6 +625,7 @@ async def handle(ws, message, server_data=None):
                         username = users.get_username_by_id(user_id)
                         server_data["plugin_manager"].trigger_event("message_edit", ws, {
                             "channel": channel_name,
+                            "thread_id": thread_id,
                             "id": message_id,
                             "content": new_content,
                             "user_id": user_id,
@@ -490,6 +634,9 @@ async def handle(ws, message, server_data=None):
                     edited_msg = channels.get_channel_message(channel_name, message_id)
                     if edited_msg:
                         edited_msg = channels.convert_messages_to_user_format([edited_msg])[0]
+                        pings = get_message_pings(new_content, user_roles)
+                        if pings.get("users") or pings.get("roles"):
+                            edited_msg["pings"] = pings
                     return {"cmd": "message_edit", "id": message_id, "content": new_content, "message": edited_msg, "channel": channel_name, "global": True}
             case "message_delete":
                 user_id, error = _require_user_id(ws)
@@ -1930,16 +2077,7 @@ async def handle(ws, message, server_data=None):
                 user_roles = user_data.get("roles", [])
                 username = user_data.get("username")
 
-                ping_patterns = [
-                    f"@{username}",
-                    f"@{username}@",
-                    f"@{username} "
-                ]
-
-                for role in user_roles:
-                    ping_patterns.append(f"@&{role}")
-                    ping_patterns.append(f"@&{role}@")
-                    ping_patterns.append(f"@&{role} ")
+                ping_patterns = get_ping_patterns_for_user(username, user_roles)
 
                 all_channels = channels.get_channels()
                 pinged_messages = []
@@ -1957,13 +2095,8 @@ async def handle(ws, message, server_data=None):
                         continue
 
                     for msg in channel_messages:
-
-                        is_mentioned_in_content = False
                         content = msg.get("content", "")
-                        for pattern in ping_patterns:
-                            if pattern in content:
-                                is_mentioned_in_content = True
-                                break
+                        is_mentioned_in_content = check_ping_in_content(content, ping_patterns)
 
                         is_replied_to = False
                         reply_to = msg.get("reply_to")
@@ -2172,7 +2305,7 @@ async def handle(ws, message, server_data=None):
                     return error
 
                 thread_id = message.get("thread_id")
-                start = message.get("start")
+                start = message.get("start", 0)
                 limit = message.get("limit", 100)
 
                 if not thread_id:

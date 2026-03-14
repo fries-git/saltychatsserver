@@ -328,3 +328,23 @@ def get_validator(user_id):
     if not user:
         return None
     return user.get("validator")
+
+
+def get_usernames_by_role(role_name):
+    """
+    Get all usernames that have a specific role.
+
+    Args:
+        role_name (str): The name of the role to search for.
+
+    Returns:
+        list: A list of usernames that have the specified role.
+    """
+    with _lock:
+        users = _get_users_cache()
+        usernames = []
+        for user_id, user_data in users.items():
+            if role_name in user_data.get("roles", []):
+                username = user_data.get("username", user_id)
+                usernames.append(username)
+        return usernames

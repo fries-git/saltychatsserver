@@ -175,6 +175,15 @@ def get_message_pings(content, sender_user_roles):
     mentioned_users = extract_user_mentions(content)
     mentioned_roles = extract_role_mentions(content)
     
+    valid_users = set()
+    for username in mentioned_users:
+        user_id = users.get_id_by_username(username)
+        if user_id:
+            actual_username = users.get_username_by_id(user_id)
+            valid_users.add(actual_username)
+        else:
+            valid_users.add(username)
+    
     valid_roles = set()
     for role in mentioned_roles:
         if roles.role_exists(role) and roles.can_role_mention_role(sender_user_roles, role):
@@ -183,8 +192,9 @@ def get_message_pings(content, sender_user_roles):
             valid_roles.add(role)
     
     return {
-        "users": mentioned_users,
-        "roles": valid_roles
+        "users": list(valid_users),
+        "roles": list(valid_roles),
+        "replies": []
     }
 
 
@@ -435,14 +445,12 @@ async def handle(ws, message, server_data=None):
                     "id": str(uuid.uuid4())
                 }
 
-                # Add reply information if this is a reply
                 if reply_to and replied_message:
                     out_msg["reply_to"] = {
                         "id": reply_to,
                         "user": replied_message.get("user")
                     }
 
-                # Add ping field if provided (for replies)
                 ping_field = message.get("ping")
                 if ping_field is not None:
                     out_msg["ping"] = bool(ping_field)
@@ -454,46 +462,52 @@ async def handle(ws, message, server_data=None):
                     channels.save_channel_message(channel_name, out_msg)
                     out_msg_for_client = channels.convert_messages_to_user_format([out_msg])[0]
 
-                # Include ping field if present
                 if "ping" in out_msg:
                     out_msg_for_client["ping"] = out_msg["ping"]
 
-                # Get username for plugin event
+                reply_user = None
+                if out_msg_for_client.get("reply_to") and out_msg_for_client["reply_to"].get("user"):
+                    reply_user = out_msg_for_client["reply_to"]["user"]
+                    if reply_user and isinstance(reply_user, str):
+                        resolved_username = users.get_username_by_id(reply_user)
+                        if resolved_username:
+                            out_msg_for_client["reply_to"]["user"] = resolved_username
+
                 username = users.get_username_by_id(user_id)
 
-                # Calculate pings for the message using centralized function
                 pings = get_message_pings(content, user_roles)
-                
-                # Check if message is a reply with ping enabled
-                is_reply_ping = False
+
+                reply_author_id = None
                 if reply_to and replied_message:
                     reply_ping_enabled = message.get("ping", True)
                     if reply_ping_enabled:
                         original_author_id = replied_message.get("user")
-                        if original_author_id:
-                            original_author_user = users.get_user(original_author_id)
-                            if original_author_user:
-                                is_reply_ping = True
-                                pings.setdefault("replies", [])
-                                pings["replies"].append(original_author_id)
+                        if original_author_id and reply_user:
+                            reply_author_id = original_author_id
+                            if "replies" not in pings:
+                                pings["replies"] = []
+                            pings["replies"].append(reply_user)
 
-                # Only add pings field if there are any pings
-                if pings.get("users") or pings.get("roles") or pings.get("replies"):
+                if pings.get("users") or pings.get("roles") or "replies" in pings:
                     out_msg_for_client["pings"] = pings
 
-                # Trigger new_message event for plugins
                 if server_data and "plugin_manager" in server_data:
-                    server_data["plugin_manager"].trigger_event("new_message", ws, {
-                        "content": content,
-                        "channel": channel_name,
-                        "user_id": user_id,
-                        "username": username,
-                        "message": out_msg
-                    }, server_data)
+                    try:
+                        server_data["plugin_manager"].trigger_event("new_message", ws, {
+                            "content": content,
+                            "channel": channel_name,
+                            "user_id": user_id,
+                            "username": username,
+                            "message": out_msg
+                        }, server_data)
+                    except Exception:
+                        pass
 
-                mentioned_usernames = extract_user_mentions(content, exclude_username=username)
-                for mentioned_username in mentioned_usernames:
-                    if not push_handler.is_user_online(mentioned_username, server_data):
+                for mentioned_username in (pings.get("users") or set()):
+                    if mentioned_username == username:
+                        continue
+
+                    if server_data and not push_handler.is_user_online(mentioned_username, server_data):
                         push_handler.send_push_notification(
                             username=mentioned_username,
                             title=f"#{channel_name} \u2014 {username}",
@@ -501,9 +515,21 @@ async def handle(ws, message, server_data=None):
                             extra_data={"channelName": channel_name},
                         )
 
-                if reply_to and replied_message:
-                    original_author_id = replied_message.get("user")
-                    original_author = users.get_username_by_id(original_author_id) if original_author_id else None
+                for mentioned_role in (pings.get("roles") or []):
+                    role_members = users.get_usernames_by_role(mentioned_role)
+                    for member_username in role_members:
+                        if member_username == username:
+                            continue
+                        if server_data and not push_handler.is_user_online(member_username, server_data):
+                            push_handler.send_push_notification(
+                                username=member_username,
+                                title=f"#{channel_name} \u2014 {username} mentioned @{mentioned_role}",
+                                body=content,
+                                extra_data={"channelName": channel_name},
+                            )
+
+                if reply_to and replied_message and reply_author_id:
+                    original_author = users.get_username_by_id(reply_author_id)
                     ping_flag = message.get("ping", True)
                     if ping_flag and original_author and original_author != username:
                         if not push_handler.is_user_online(original_author, server_data):
@@ -514,18 +540,15 @@ async def handle(ws, message, server_data=None):
                                 extra_data={"channelName": channel_name},
                             )
 
-                # Optionally broadcast to all clients
                 if thread_id:
                     return {"cmd": "message_new", "message": out_msg_for_client, "thread_id": thread_id, "global": True}
                 else:
                     return {"cmd": "message_new", "message": out_msg_for_client, "channel": channel_name, "global": True}
             case "typing":
-                # Handle typing
                 user_id, error = _require_user_id(ws)
                 if error:
                     return error
 
-                # Check rate limiting if enabled
                 if server_data and server_data.get("rate_limiter"):
                     is_allowed, reason, wait_time = server_data["rate_limiter"].is_allowed(user_id)
                     if not is_allowed:

@@ -473,13 +473,23 @@ def get_all_channels_for_roles(roles):
         for channel in _get_channels_cache():
             permissions = channel.get("permissions", {})
             view_roles = permissions.get("view", [])
-            if any(role in view_roles for role in roles):
-                channel_copy = copy.deepcopy(channel)
-                if channel_copy.get("type") == "forum":
-                    channel_name: str = channel_copy.get("name", "")
-                    if channel_name:
-                        channel_copy["threads"] = threads.get_channel_threads(channel_name)
+            if not any(role in view_roles for role in roles):
+                continue
+            channel_copy = copy.deepcopy(channel)
+            if channel_copy.get("type") != "forum":
                 result.append(channel_copy)
+                continue
+            channel_name: str = channel_copy.get("name", "")
+            if not channel_name:
+                continue
+            channel_threads = threads.get_channel_threads(channel_name)
+            thread_results = []
+            for thread in channel_threads:
+                thread_copy = copy.deepcopy(thread)
+                thread_copy["created_by"] = users.get_username_by_id(thread_copy["created_by"])
+                thread_results.append(thread_copy)
+            channel_copy["threads"] = thread_results
+            result.append(channel_copy)
         return result
 
 

@@ -9,6 +9,7 @@ from schemas.server_emoji_schema import Emoji_add, Emoji_delete, Emoji_get_all, 
 from handlers.websocket_utils import broadcast_to_voice_channel_with_viewers, broadcast_to_all
 from handlers import push as push_handler
 from typing import TypeVar
+import copy
 
 T = TypeVar("T")
 
@@ -1973,7 +1974,10 @@ async def handle(ws, message, server_data=None):
                 username = users.get_username_by_id(user_id)
                 thread_data = threads.create_thread(channel_name, thread_name, user_id)
 
-                return {"cmd": "thread_create", "thread": thread_data, "channel": channel_name, "global": True}
+                thread_data_copy = copy.deepcopy(thread_data)
+                thread_data_copy["created_by"] = username
+
+                return {"cmd": "thread_create", "thread": thread_data_copy, "channel": channel_name, "global": True}
             case "thread_get":
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:

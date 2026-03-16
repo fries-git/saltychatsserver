@@ -525,7 +525,7 @@ class OriginChatsServer:
         self.main_event_loop = asyncio.get_event_loop()
 
         # Setup file watchers for users.json and channels.json
-        self.file_observer = watchers.setup_file_watchers(self.broadcast_wrapper, self.main_event_loop)
+        self.file_observer = watchers.setup_file_watchers(self.broadcast_wrapper, self.main_event_loop, lambda: self.connected_clients)
 
         port = self.config.get("websocket", {}).get("port", 5613)
         host = self.config.get("websocket", {}).get("host", "127.0.0.1")

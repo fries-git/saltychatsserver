@@ -1385,32 +1385,17 @@ async def handle(ws, message, server_data=None):
                 commands_list = []
 
                 for key, value in slash_commands.items():
-                    # Server commands are stored flat: {"server_cmd": cmd_data}
-                    # Client commands are nested: {ws_id: {"cmd": cmd_data}}
-                    if key.startswith("server_"):
-                        cmd_data = value
+                    for cmd_name, cmd_data in value.items():
                         command_obj = cmd_data["command"]
                         commands_list.append({
                             "name": command_obj.name,
                             "description": command_obj.description,
-                            "options": getattr(command_obj, "options", []),
+                            "options": [opt.model_dump() if hasattr(opt, "model_dump") else opt for opt in getattr(command_obj, "options", [])],
                             "whitelistRoles": getattr(command_obj, "whitelistRoles", None),
                             "blacklistRoles": getattr(command_obj, "blacklistRoles", None),
                             "ephemeral": getattr(command_obj, "ephemeral", False),
                             "registeredBy": cmd_data.get("username", "originChats")
                         })
-                    else:
-                        for cmd_name, cmd_data in value.items():
-                            command_obj = cmd_data["command"]
-                            commands_list.append({
-                                "name": command_obj.name,
-                                "description": command_obj.description,
-                                "options": [opt.model_dump() for opt in command_obj.options],
-                                "whitelistRoles": command_obj.whitelistRoles,
-                                "blacklistRoles": command_obj.blacklistRoles,
-                                "ephemeral": command_obj.ephemeral,
-                                "registeredBy": cmd_data["username"]
-                            })
 
                 return {"cmd": "slash_list", "commands": commands_list}
             case "slash_call":

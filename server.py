@@ -116,13 +116,14 @@ class OriginChatsServer:
             Logger.warning("No server slash commands found")
             return
 
+        self.slash_commands["server"] = {}
         registered_commands = []
         for cmd_info in server_commands:
             cmd_name = cmd_info.get("name")
             if not cmd_name:
                 continue
 
-            self.slash_commands[f"server_{cmd_name}"] = {
+            self.slash_commands["server"][cmd_name] = {
                 "command": type('obj', (object,), {
                     "name": cmd_name,
                     "description": cmd_info.get("description", ""),
@@ -383,14 +384,6 @@ class OriginChatsServer:
                     "capabilities": self.capabilities
                 }
             })
-
-            # Send server slash commands to the client
-            if hasattr(self, '_server_slash_commands') and self._server_slash_commands:
-                await send_to_client(websocket, {
-                    "cmd": "slash_add",
-                    "commands": self._server_slash_commands
-                })
-                
             # Keep connection open and handle client messages
             async for message in websocket:
                 try:

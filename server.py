@@ -1,12 +1,12 @@
 import asyncio, websockets, json, os, mimetypes, secrets
-from urllib.parse import urlsplit, unquote
+from urllib.parse import urlsplit, unquote, parse_qs
 from websockets.datastructures import Headers
 from websockets.http11 import Request, Response, d, parse_headers, parse_line
 from handlers.websocket_utils import send_to_client, heartbeat, broadcast_to_all, broadcast_to_all_except, broadcast_to_channel_except, broadcast_to_voice_channel_with_viewers
 from handlers.auth import handle_authentication
 from handlers import message as message_handler
 from handlers.rate_limiter import RateLimiter
-from db import serverEmojis, push as push_db
+from db import serverEmojis, push as push_db, webhooks as webhooks_db, channels
 import watchers
 from plugin_manager import PluginManager
 from logger import Logger
@@ -24,7 +24,6 @@ def _patch_websockets_request_parse():
         except EOFError as exc:
             raise EOFError("connection closed while reading HTTP request line") from exc
 
-        # normalize potential bytearray
         request_line = bytes(request_line)
 
         try:
@@ -36,18 +35,14 @@ def _patch_websockets_request_parse():
             raise ValueError(
                 f"unsupported protocol; expected HTTP/1.1: {d(request_line)}"
             )
-        if method not in {b"GET", b"HEAD", b"OPTIONS"}:
-            raise ValueError(f"unsupported HTTP method; expected GET; got {d(method)}")
+        if method not in {b"GET", b"HEAD", b"OPTIONS", b"POST"}:
+            raise ValueError(f"unsupported HTTP method; expected GET/POST; got {d(method)}")
 
         path = raw_path.decode("ascii", "surrogateescape")
         headers = yield from parse_headers(read_line)
 
         if "Transfer-Encoding" in headers:
             raise NotImplementedError("transfer codings aren't supported")
-
-        content_length = headers.get("Content-Length")
-        if content_length not in (None, "0"):
-            raise ValueError("unsupported request body")
 
         request = cls(path, headers)
         setattr(request, "method", method.decode("ascii", "surrogateescape"))
@@ -249,6 +244,103 @@ class OriginChatsServer:
 
         return file_path
 
+    async def _read_request_body(self, connection, content_length):
+        body = b""
+        remaining = content_length
+        while remaining > 0:
+            try:
+                chunk = await connection.recv(min(remaining, 8192))
+                if isinstance(chunk, str):
+                    chunk = chunk.encode("utf-8")
+                body += chunk
+                remaining -= len(chunk)
+            except Exception:
+                break
+        return body
+
+    async def _handle_webhook_request(self, token, body):
+        webhook = webhooks_db.get_webhook_by_token(token)
+        if not webhook:
+            return Response(
+                401,
+                "Unauthorized",
+                self._response_headers([("Content-Type", "application/json")]),
+                json.dumps({"error": "Invalid webhook token"}).encode("utf-8")
+            )
+
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return Response(
+                400,
+                "Bad Request",
+                self._response_headers([("Content-Type", "application/json")]),
+                json.dumps({"error": "Invalid JSON body"}).encode("utf-8")
+            )
+
+        content = data.get("content") or data.get("text") or ""
+        username = data.get("username") or webhook.get("name") or "Webhook"
+        avatar_url = data.get("avatar_url") or webhook.get("avatar")
+        embeds = data.get("embeds", [])
+
+        if not content and not embeds:
+            content = data.get("message", "")
+
+        if not content and not embeds:
+            return Response(
+                400,
+                "Bad Request",
+                self._response_headers([("Content-Type", "application/json")]),
+                json.dumps({"error": "No content provided"}).encode("utf-8")
+            )
+
+        channel_name = webhook.get("channel")
+        if not channels.channel_exists(channel_name):
+            return Response(
+                404,
+                "Not Found",
+                self._response_headers([("Content-Type", "application/json")]),
+                json.dumps({"error": "Channel not found"}).encode("utf-8")
+            )
+
+        import uuid
+        import time
+        message_id = str(uuid.uuid4())
+        out_msg = {
+            "user": "originChats",
+            "content": content,
+            "timestamp": time.time(),
+            "type": "message",
+            "pinned": False,
+            "id": message_id,
+            "webhook": {
+                "id": webhook.get("id"),
+                "name": username,
+                "avatar": avatar_url
+            }
+        }
+
+        if embeds:
+            out_msg["embeds"] = embeds
+
+        channels.save_channel_message(channel_name, out_msg)
+
+        out_msg_for_client = channels.convert_messages_to_user_format([out_msg])[0]
+
+        await broadcast_to_channel_except(self.connected_clients, {
+            "cmd": "message_new",
+            "message": out_msg_for_client,
+            "channel": channel_name,
+            "global": True
+        }, channel_name, None)
+
+        return Response(
+            204,
+            "No Content",
+            self._response_headers(),
+            b""
+        )
+
     def _response_headers(self, extra_headers=None):
         headers = list(extra_headers or [])
         headers.extend([
@@ -297,11 +389,66 @@ class OriginChatsServer:
         request_method = getattr(request, "method", "GET").upper()
         if request_method == "OPTIONS":
             return self._empty_response(204, "No Content")
+        
+        path = urlsplit(request.path).path
+        query_params = {}
+        if "?" in request.path:
+            query_string = request.path.split("?", 1)[1]
+            query_params = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(query_string).items()}
+
+        if request_method == "POST":
+            content_length = int(request.headers.get("Content-Length", 0))
+            if content_length == 0:
+                return Response(
+                    400,
+                    "Bad Request",
+                    self._response_headers([("Content-Type", "application/json")]),
+                    json.dumps({"error": "Content-Length required"}).encode("utf-8")
+                )
+
+            content_type = request.headers.get("Content-Type", "application/json")
+            if not content_type.startswith("application/json"):
+                return Response(
+                    415,
+                    "Unsupported Media Type",
+                    self._response_headers([("Content-Type", "application/json")]),
+                    json.dumps({"error": "Content-Type must be application/json"}).encode("utf-8")
+                )
+
+            if content_length > 10 * 1024 * 1024:
+                return Response(
+                    413,
+                    "Payload Too Large",
+                    self._response_headers([("Content-Type", "application/json")]),
+                    json.dumps({"error": "Request body too large (max 10MB)"}).encode("utf-8")
+                )
+
+            body = await self._read_request_body(connection, content_length)
+
+            if path == "/webhooks" or path.startswith("/webhooks/"):
+                token = query_params.get("token")
+                if not token:
+                    return Response(
+                        401,
+                        "Unauthorized",
+                        self._response_headers([("Content-Type", "application/json")]),
+                        json.dumps({"error": "Webhook token required"}).encode("utf-8")
+                    )
+                
+                return await self._handle_webhook_request(token, body)
+
+            return Response(
+                404,
+                "Not Found",
+                self._response_headers([("Content-Type", "application/json")]),
+                json.dumps({"error": "Endpoint not found"}).encode("utf-8")
+            )
+
         if request_method not in {"GET", "HEAD"}:
             return self._empty_response(
                 405,
                 "Method Not Allowed",
-                [("Allow", "GET, HEAD, OPTIONS")],
+                [("Allow", "GET, HEAD, OPTIONS, POST")],
             )
 
         upgrade = request.headers.get("Upgrade", "")
@@ -311,7 +458,6 @@ class OriginChatsServer:
         if is_websocket_upgrade:
             return None
 
-        path = urlsplit(request.path).path
         if path in ("/", "/index.html"):
             index_path = os.path.join(os.path.dirname(__file__), "index.html")
             if not os.path.isfile(index_path):

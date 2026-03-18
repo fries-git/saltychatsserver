@@ -1,4 +1,4 @@
-from db import channels, users, roles, serverEmojis, threads
+from db import channels, users, roles, serverEmojis, threads, webhooks as webhooks_db
 import time, uuid, sys, os, asyncio, json, re
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logger import Logger
@@ -1333,8 +1333,13 @@ async def handle(ws, message, server_data=None):
                 username = users.get_username_by_id(user_id)
 
                 for client_ws in connected_clients:
-                    if client_ws != ws and getattr(client_ws, "user_id") == user_id:
-                        return _error("You already have slash commands registered from another session", match_cmd)
+                    try:
+                        if client_ws != ws:
+                            client_user_id = getattr(client_ws, "user_id", None)
+                            if client_user_id == user_id:
+                                return _error("You already have slash commands registered from another session", match_cmd)
+                    except (AttributeError, TypeError):
+                        continue
 
                 slash_commands[id(ws)] = {}
 
@@ -2526,5 +2531,146 @@ async def handle(ws, message, server_data=None):
                 updated_thread["participants"] = [users.get_username_by_id(pid) for pid in participant_ids]
 
                 return {"cmd": "thread_leave", "thread": updated_thread, "thread_id": thread_id, "user": username, "global": True}
+            case "webhook_create":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+                user_roles, error = _require_user_roles(user_id, requiredRoles=["owner"])
+                if error:
+                    return error
+
+                channel = message.get("channel")
+                name = message.get("name")
+                
+                if not channel:
+                    return _error("Channel is required", match_cmd)
+                if not name:
+                    return _error("Webhook name is required", match_cmd)
+
+                if not channels.channel_exists(channel):
+                    return _error("Channel not found", match_cmd)
+                
+                channel_info = channels.get_channel(channel)
+                if channel_info.get("type") != "text":
+                    return _error("Webhooks can only be created for text channels", match_cmd)
+
+                webhook = webhooks_db.create_webhook(channel, name, user_id)
+                if not webhook:
+                    return _error("Failed to create webhook", match_cmd)
+                
+                display_webhook = copy.deepcopy(webhook)
+                
+                return {"cmd": "webhook_create", "webhook": display_webhook}
+            case "webhook_get":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+
+                webhook_id = message.get("id")
+                if not webhook_id:
+                    return _error("Webhook ID is required", match_cmd)
+
+                webhook = webhooks_db.get_webhook(webhook_id)
+                if not webhook:
+                    return _error("Webhook not found", match_cmd)
+
+                if "token" in webhook:
+                    del webhook["token"]
+
+                return {"cmd": "webhook_get", "webhook": webhook}
+            case "webhook_list":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+
+                channel = message.get("channel")
+                
+                if channel:
+                    if not channels.channel_exists(channel):
+                        return _error("Channel not found", match_cmd)
+                    webhooks_list = webhooks_db.get_webhooks_for_channel(channel)
+                else:
+                    webhooks_list = webhooks_db.get_all_webhooks()
+
+                return {"cmd": "webhook_list", "webhooks": webhooks_list}
+            case "webhook_delete":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+                user_roles, error = _require_user_roles(user_id, requiredRoles=["owner"])
+                if error:
+                    return error
+
+                webhook_id = message.get("id")
+                if not webhook_id:
+                    return _error("Webhook ID is required", match_cmd)
+
+                webhook = webhooks_db.get_webhook(webhook_id)
+                if not webhook:
+                    return _error("Webhook not found", match_cmd)
+
+                deleted = webhooks_db.delete_webhook(webhook_id)
+                if not deleted:
+                    return _error("Failed to delete webhook", match_cmd)
+
+                return {"cmd": "webhook_delete", "id": webhook_id, "deleted": True}
+            case "webhook_update":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+                user_roles, error = _require_user_roles(user_id, requiredRoles=["owner"])
+                if error:
+                    return error
+
+                webhook_id = message.get("id")
+                if not webhook_id:
+                    return _error("Webhook ID is required", match_cmd)
+
+                webhook = webhooks_db.get_webhook(webhook_id)
+                if not webhook:
+                    return _error("Webhook not found", match_cmd)
+
+                updates = {}
+                if "name" in message:
+                    name = message["name"]
+                    if not name or not isinstance(name, str):
+                        return _error("Webhook name must be a non-empty string", match_cmd)
+                    updates["name"] = name.strip()
+                if "avatar" in message:
+                    updates["avatar"] = message["avatar"]
+
+                if not updates:
+                    return _error("No updates provided", match_cmd)
+
+                updated_webhook = webhooks_db.update_webhook(webhook_id, updates)
+                if not updated_webhook:
+                    return _error("Failed to update webhook", match_cmd)
+
+                return {"cmd": "webhook_update", "webhook": updated_webhook}
+            case "webhook_regenerate":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+                user_roles, error = _require_user_roles(user_id, requiredRoles=["owner"])
+                if error:
+                    return error
+
+                webhook_id = message.get("id")
+                if not webhook_id:
+                    return _error("Webhook ID is required", match_cmd)
+
+                webhook = webhooks_db.get_webhook(webhook_id)
+                if not webhook:
+                    return _error("Webhook not found", match_cmd)
+
+                new_token = str(uuid.uuid4()) + str(uuid.uuid4()).replace("-", "")
+                
+                updated_webhook = webhooks_db.update_webhook(webhook_id, {"token": new_token})
+                if not updated_webhook:
+                    return _error("Failed to regenerate webhook token", match_cmd)
+                
+                webhook_with_token = webhooks_db.get_webhook(webhook_id)
+
+                return {"cmd": "webhook_regenerate", "webhook": webhook_with_token}
             case _:
                 return _error(f"Unknown command: {message.get('cmd')}", match_cmd)

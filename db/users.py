@@ -199,7 +199,26 @@ def give_role(user_id, role):
             user["roles"].insert(0, role)
             save_user(user_id, user)
             return True
-    return False
+        return False
+
+def set_user_roles(user_id, roles):
+    """
+    Set the exact roles for a user.
+
+    Args:
+        user_id (str): The ID of the user.
+        roles (list): A list of roles to set as the user's roles.
+
+    Returns:
+        bool: True if roles were set successfully, False otherwise.
+    """
+    with _lock:
+        user = get_user(user_id)
+        if user:
+            user["roles"] = roles
+            save_user(user_id, user)
+            return True
+        return False
 
 def remove_role(user_id, role):
     """

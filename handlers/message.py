@@ -1461,7 +1461,7 @@ async def handle(ws, message, server_data=None):
                 return handle_channel_move(ws, message, match_cmd, server_data)
             case "channel_delete":
                 return handle_channel_delete(ws, message, match_cmd, server_data)
-            case "user_roles_add":
+            case "user_roles_set":
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
                     return error
@@ -1470,82 +1470,34 @@ async def handle(ws, message, server_data=None):
                     return error
 
                 target = message.get("user")
-                roles_to_add = message.get("roles")
+                roles_to_set = message.get("roles")
 
                 if not target:
                     return _error("User parameter is required", match_cmd)
-                if not roles_to_add or not isinstance(roles_to_add, list):
+                if not roles_to_set or not isinstance(roles_to_set, list):
                     return _error("Roles list is required", match_cmd)
 
                 target_id = users.get_id_by_username(target) or target
                 if not users.user_exists(target_id):
                     return _error("User not found", match_cmd)
 
-                user_data = users.get_user(target_id)
-                if not user_data:
-                    return _error("User not found", match_cmd)
-                user_roles = user_data.get("roles", [])
+                for role in roles_to_set:
+                    if not roles.role_exists(role):
+                        return _error(f"Role '{role}' does not exist", match_cmd)
 
-                for role in roles_to_add:
-                    if role not in user_roles:
-                        if not roles.role_exists(role):
-                            return _error(f"Role '{role}' does not exist", match_cmd)
-                        users.give_role(target_id, role)
-
+                users.set_user_roles(target_id, roles_to_set)
                 updated_user = users.get_user(target_id)
                 username = users.get_username_by_id(target_id)
                 if server_data:
-                    server_data["plugin_manager"].trigger_event("user_roles_add", ws, {
+                    server_data["plugin_manager"].trigger_event("user_roles_set", ws, {
                         "user_id": target_id,
                         "username": username,
-                        "roles": roles_to_add
+                        "roles": roles_to_set
                     }, server_data)
 
                 if not updated_user:
                     return _error("User not found", match_cmd)
-                return {"cmd": "user_roles_add", "user": username, "roles": updated_user.get("roles", []), "added": True}
-            case "user_roles_remove":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                target = message.get("user")
-                roles_to_remove = message.get("roles")
-
-                if not target:
-                    return _error("User parameter is required", match_cmd)
-                if not roles_to_remove or not isinstance(roles_to_remove, list):
-                    return _error("Roles list is required", match_cmd)
-
-                target_id = users.get_id_by_username(target) or target
-                if not users.user_exists(target_id):
-                    return _error("User not found", match_cmd)
-
-                user_data = users.get_user(target_id)
-                if not user_data:
-                    return _error("User not found", match_cmd)
-                user_roles = user_data.get("roles", [])
-
-                remaining_roles = [r for r in user_roles if r not in roles_to_remove]
-                if not remaining_roles:
-                    return _error("Cannot remove all roles from a user", match_cmd)
-
-                removed = users.remove_user_roles(target_id, roles_to_remove)
-                updated_user = users.get_user(target_id)
-                username = users.get_username_by_id(target_id)
-                if server_data and removed:
-                    server_data["plugin_manager"].trigger_event("user_roles_remove", ws, {
-                        "user_id": target_id,
-                        "username": username,
-                        "roles": roles_to_remove
-                    }, server_data)
-
-                if not updated_user:
-                    return _error("User not found", match_cmd)
-                return {"cmd": "user_roles_remove", "user": username, "roles": updated_user.get("roles", []), "removed": removed}
+                return {"cmd": "user_roles_set", "user": username, "roles": updated_user.get("roles", []), "set": True}
             case "user_roles_get":
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:

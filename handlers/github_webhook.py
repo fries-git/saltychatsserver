@@ -8,87 +8,54 @@ from logger import Logger
 def format_github_push_message(payload: dict) -> dict:
     ref = payload.get("ref", "")
     branch = ref.replace("refs/heads/", "") if ref.startswith("refs/heads/") else ref
-    
+
     repo = payload.get("repository", {})
-    repo_name = repo.get("name", "unknown")
     repo_full_name = repo.get("full_name", "unknown")
     repo_url = repo.get("html_url", "")
-    
+
     sender = payload.get("sender", {})
-    sender_name = sender.get("login", "unknown")
-    sender_avatar = sender.get("avatar_url", "")
-    
-    pusher = payload.get("pusher", {})
-    pusher_name = pusher.get("name", sender_name)
-    
+    pusher_name = sender.get("login", "unknown")
+
     commits = payload.get("commits", [])
     commit_count = len(commits)
-    
+
     compare_url = payload.get("compare", "")
-    
+
     forced = payload.get("forced", False)
     created = payload.get("created", False)
     deleted = payload.get("deleted", False)
-    
-    title = ""
-    description = ""
-    
+
     if deleted:
-        title = f"🗑️ **{branch}** deleted"
-        description = f"Branch **{branch}** was deleted in **[{repo_full_name}]({repo_url})** by **{pusher_name}**"
+        title = f"{branch} deleted"
     elif created:
-        title = f"🌿 **{branch}** created"
-        description = f"New branch **{branch}** created in **[{repo_full_name}]({repo_url})** by **{pusher_name}**"
+        title = f"{branch} created"
     elif forced:
-        title = f"⚡ **{branch}** force-pushed"
-        description = f"**{pusher_name}** force-pushed **{commit_count} commit(s)** to **{branch}** in **[{repo_full_name}]({repo_url})**"
+        title = f"{branch} force-pushed"
     else:
-        title = f"📤 **{branch}** pushed"
-        if commit_count == 1:
-            description = f"**{commit_count} commit** to **{branch}** in **[{repo_full_name}]({repo_url})**"
-        else:
-            description = f"**{commit_count} commits** to **{branch}** in **[{repo_full_name}]({repo_url})**"
-    
+        title = f"{branch}: {commit_count} commit{'s' if commit_count != 1 else ''}"
+
     embed = {
         "title": title,
-        "description": description,
         "url": compare_url if compare_url else repo_url,
         "color": 0x24292e,
         "author": {
-            "name": pusher_name,
-            "icon_url": sender_avatar
-        },
-        "footer": {
-            "text": repo_full_name,
-            "icon_url": repo.get("owner", {}).get("avatar_url", "")
+            "name": f"{pusher_name} - {repo_full_name}",
+            "url": repo_url,
+            "icon_url": sender.get("avatar_url", "")
         },
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     }
-    
+
     if commits:
         commit_list = []
-        for commit in commits[:5]:
+        for commit in commits:
             commit_id = commit.get("id", "")[:7]
             commit_msg = commit.get("message", "").split("\n")[0]
             commit_url = commit.get("url", "")
-            commit_author = commit.get("author", {}).get("username", "unknown")
-            
-            if len(commit_msg) > 50:
-                commit_msg = commit_msg[:47] + "..."
-            
-            commit_list.append(f"[`{commit_id}`]({commit_url}) {commit_msg} - **{commit_author}**")
-        
-        if len(commits) > 5:
-            commit_list.append(f"... and {len(commits) - 5} more commits")
-        
-        embed["fields"] = [
-            {
-                "name": "Commits",
-                "value": "\n".join(commit_list),
-                "inline": False
-            }
-        ]
-    
+            commit_list.append(f"[`{commit_id}`]({commit_url}) {commit_msg}")
+
+        embed["description"] = "\n".join(commit_list)
+
     return embed
 
 

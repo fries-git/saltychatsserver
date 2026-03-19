@@ -10,6 +10,17 @@ import emoji
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 channels_db_dir = os.path.join(_MODULE_DIR, "channels")
 channels_index = os.path.join(_MODULE_DIR, "channels.json")
+
+DEFAULT_PERMISSIONS = {
+    "view": ["owner"],
+    "send": ["owner"],
+    "delete": ["owner"],
+    "edit_own": ["owner"],
+    "react": ["owner"],
+    "pin": ["owner"],
+    "create_thread": ["owner"]
+}
+
 DEFAULT_CHANNELS = [
     {
         "type": "text",
@@ -496,7 +507,7 @@ def get_all_channels_for_roles(roles):
         return result
 
 
-def edit_channel_message(channel_name, message_id, new_content):
+def edit_channel_message(channel_name, message_id, new_content, embeds=None):
     """
     Edit a message in a specific channel.
 
@@ -504,6 +515,7 @@ def edit_channel_message(channel_name, message_id, new_content):
         channel_name (str): The name of the channel.
         message_id (str): The ID of the message to edit.
         new_content (str): The new content for the message.
+        embeds (list, optional): The new embeds for the message.
 
     Returns:
         bool: True if the message was edited successfully, False otherwise.
@@ -520,6 +532,8 @@ def edit_channel_message(channel_name, message_id, new_content):
         msg = copy.deepcopy(old_msg)
         msg["content"] = new_content
         msg["edited"] = True
+        if embeds is not None:
+            msg["embeds"] = embeds
 
         new_serialised = json.dumps(msg, separators=(',', ':'), ensure_ascii=False)
 
@@ -575,9 +589,11 @@ def does_user_have_permission(channel_name, user_roles, permission_type):
         for channel in _get_channels_cache():
             if channel.get("name") == channel_name:
                 permissions = channel.get("permissions", {})
-                allowed_roles = permissions.get(permission_type, [])
+                allowed_roles = permissions.get(permission_type)
+                if allowed_roles is None or allowed_roles == []:
+                    allowed_roles = DEFAULT_PERMISSIONS.get(permission_type, [])
                 return any(role in allowed_roles for role in user_roles)
-    return False
+        return False
 
 
 def delete_channel_message(channel_name, message_id):
@@ -688,11 +704,11 @@ def can_user_pin(channel_name, user_roles):
         for channel in _get_channels_cache():
             if channel.get("name") == channel_name:
                 permissions = channel.get("permissions", {})
-                if "pin" not in permissions:
-                    return "owner" in user_roles
-                allowed_roles = permissions.get("pin", [])
+                allowed_roles = permissions.get("pin")
+                if allowed_roles is None or allowed_roles == []:
+                    allowed_roles = DEFAULT_PERMISSIONS.get("pin", ["owner"])
                 return any(role in allowed_roles for role in user_roles)
-    return False
+        return False
 
 
 def pin_channel_message(channel_name, message_id):
@@ -964,11 +980,11 @@ def can_user_delete_own(channel_name, user_roles):
         for channel in _get_channels_cache():
             if channel.get("name") == channel_name:
                 permissions = channel.get("permissions", {})
-                if "delete_own" not in permissions:
-                    return True
-                allowed_roles = permissions.get("delete_own", [])
+                allowed_roles = permissions.get("delete_own")
+                if allowed_roles is None or allowed_roles == []:
+                    allowed_roles = DEFAULT_PERMISSIONS.get("delete_own", ["owner"])
                 return any(role in allowed_roles for role in user_roles)
-    return True
+        return True
 
 
 def can_user_edit_own(channel_name, user_roles):
@@ -980,11 +996,11 @@ def can_user_edit_own(channel_name, user_roles):
         for channel in _get_channels_cache():
             if channel.get("name") == channel_name:
                 permissions = channel.get("permissions", {})
-                if "edit_own" not in permissions:
-                    return True
-                allowed_roles = permissions.get("edit_own", [])
+                allowed_roles = permissions.get("edit_own")
+                if allowed_roles is None or allowed_roles == []:
+                    allowed_roles = DEFAULT_PERMISSIONS.get("edit_own", ["owner"])
                 return any(role in allowed_roles for role in user_roles)
-    return True
+        return True
 
 def can_user_react(channel_name, user_roles):
     """
@@ -995,11 +1011,11 @@ def can_user_react(channel_name, user_roles):
         for channel in _get_channels_cache():
             if channel.get("name") == channel_name:
                 permissions = channel.get("permissions", {})
-                if "react" not in permissions:
-                    return True
-                allowed_roles = permissions.get("react", [])
+                allowed_roles = permissions.get("react")
+                if allowed_roles is None or allowed_roles == []:
+                    allowed_roles = DEFAULT_PERMISSIONS.get("react", ["owner"])
                 return any(role in allowed_roles for role in user_roles)
-    return True
+        return True
 
 def add_reaction(channel_name, message_id, emoji_str, user_id):
     """
@@ -1177,7 +1193,7 @@ def update_channel(channel_name, updates):
     for channel in channels:
         if channel.get('name') == channel_name:
             for key, value in updates.items():
-                if key in ['name', 'type', 'description', 'permissions']:
+                if key in ['description', 'permissions', 'display_name', 'wallpaper', 'size']:
                     channel[key] = value
 
             _save_channels_index(channels)

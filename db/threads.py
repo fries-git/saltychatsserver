@@ -321,7 +321,7 @@ def get_thread_message(thread_id: str, message_id: str) -> Optional[dict]:
         return msg
 
 
-def edit_thread_message(thread_id: str, message_id: str, new_content: str) -> bool:
+def edit_thread_message(thread_id: str, message_id: str, new_content: str, embeds=None) -> bool:
     with _lock:
         cache = _get_thread_messages_cache(thread_id)
         id_to_idx = cache["id_to_idx"]
@@ -334,6 +334,8 @@ def edit_thread_message(thread_id: str, message_id: str, new_content: str) -> bo
         msg = copy.deepcopy(old_msg)
         msg["content"] = new_content
         msg["edited"] = True
+        if embeds is not None:
+            msg["embeds"] = embeds
 
         cache["messages"][idx] = msg
         _full_rewrite_messages(thread_id)

@@ -4,26 +4,20 @@ from concurrent.futures import ThreadPoolExecutor
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logger import Logger
 from db import push as push_db
+from handlers.websocket_utils import _get_ws_attr
 
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
-_REPO_ROOT   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_VAPID_DIR   = os.path.join(_REPO_ROOT, "vapid")
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_VAPID_DIR = os.path.join(_REPO_ROOT, "vapid")
 _PRIVATE_KEY = os.path.join(_VAPID_DIR, "private_key.pem")
-_VAPID_CFG   = os.path.join(_VAPID_DIR, "vapid_config.json")
+_VAPID_CFG = os.path.join(_VAPID_DIR, "vapid_config.json")
 
-# ---------------------------------------------------------------------------
-# VAPID state — populated by _init_vapid() at import time
-# ---------------------------------------------------------------------------
 _VAPID_PUBLIC_KEY_B64: str = ""
-_VAPID_CLAIMS_EMAIL:   str = "mailto:"
+_VAPID_CLAIMS_EMAIL: str = "mailto:"
 
 _push_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="push")
 
 
 def _derive_public_key_b64(private_key_path: str) -> str:
-    """Load a VAPID private key file and return the base64url-encoded public key."""
     from py_vapid import Vapid
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
     v = Vapid.from_file(private_key_path)
@@ -40,22 +34,19 @@ def _save_vapid_config():
 
 
 def _init_vapid():
-    """Load or generate VAPID keys. Called once at module import time."""
     global _VAPID_PUBLIC_KEY_B64, _VAPID_CLAIMS_EMAIL
 
     os.makedirs(_VAPID_DIR, exist_ok=True)
 
-    # Load existing config
     if os.path.exists(_VAPID_CFG):
         try:
             with open(_VAPID_CFG) as f:
                 cfg = json.load(f)
-            _VAPID_PUBLIC_KEY_B64 = cfg.get("public_key_b64", "")
-            _VAPID_CLAIMS_EMAIL   = cfg.get("claims_email", _VAPID_CLAIMS_EMAIL)
+                _VAPID_PUBLIC_KEY_B64 = cfg.get("public_key_b64", "")
+                _VAPID_CLAIMS_EMAIL = cfg.get("claims_email", _VAPID_CLAIMS_EMAIL)
         except Exception as exc:
             Logger.warning(f"[Push] Could not read vapid_config.json: {exc}")
 
-    # Generate a fresh key pair if the private key is absent
     if not os.path.exists(_PRIVATE_KEY):
         Logger.warning("[Push] VAPID private key not found — generating new key pair.")
         Logger.warning("[Push] Edit vapid/vapid_config.json to set your claims_email before going live.")
@@ -69,9 +60,8 @@ def _init_vapid():
             Logger.success(f"[Push] VAPID key pair generated. Public key: {_VAPID_PUBLIC_KEY_B64[:20]}...")
         except Exception as exc:
             Logger.error(f"[Push] Failed to generate VAPID keys: {exc}")
-        return
+            return
 
-    # Private key exists but public key is missing from config — re-derive it
     if not _VAPID_PUBLIC_KEY_B64:
         try:
             _VAPID_PUBLIC_KEY_B64 = _derive_public_key_b64(_PRIVATE_KEY)
@@ -84,21 +74,12 @@ def _init_vapid():
 _init_vapid()
 
 
-# ---------------------------------------------------------------------------
-# Online presence check
-# ---------------------------------------------------------------------------
-
 def is_user_online(username: str, server_data: dict) -> bool:
-    """Return True if *username* has at least one active WS connection."""
     if not server_data:
         return False
     connected_usernames = server_data.get("connected_usernames", {})
     return username in connected_usernames and connected_usernames[username] > 0
 
-
-# ---------------------------------------------------------------------------
-# Push sender (runs in thread pool — never blocks the event loop)
-# ---------------------------------------------------------------------------
 
 def _do_send_push(username: str, title: str, body: str, extra_data: dict):
     if not _VAPID_PUBLIC_KEY_B64 or not os.path.exists(_PRIVATE_KEY):
@@ -140,10 +121,6 @@ def _do_send_push(username: str, title: str, body: str, extra_data: dict):
 
 
 def send_push_notification(username: str, title: str, body: str, extra_data: dict = None):
-    """
-    Schedule a push notification in a background thread.
-    Safe to call from any asyncio coroutine — will not block the event loop.
-    """
     if extra_data is None:
         extra_data = {}
     body = body[:120]
@@ -151,20 +128,14 @@ def send_push_notification(username: str, title: str, body: str, extra_data: dic
     loop.run_in_executor(_push_executor, _do_send_push, username, title, body, extra_data)
 
 
-# ---------------------------------------------------------------------------
-# WebSocket command handlers
-# ---------------------------------------------------------------------------
-
 async def handle_push_get_vapid(ws) -> dict:
     if not _VAPID_PUBLIC_KEY_B64:
         return {"cmd": "error", "src": "push_get_vapid", "val": "VAPID keys not configured on this server"}
     return {"cmd": "push_vapid", "key": _VAPID_PUBLIC_KEY_B64}
 
 
-async def handle_push_subscribe(ws, message: dict, server_data: dict) -> dict:
-    _ws_data = server_data.get("_ws_data", {}) if server_data else {}
-    ws_data = _ws_data.get(id(ws), {})
-    username = ws_data.get("username")
+async def handle_push_subscribe(ws, message: dict) -> dict:
+    username = _get_ws_attr(ws, "username")
     if not username:
         return {"cmd": "error", "src": "push_subscribe", "val": "Not authenticated"}
 
@@ -180,8 +151,7 @@ async def handle_push_subscribe(ws, message: dict, server_data: dict) -> dict:
     if not endpoint or not p256dh or not auth:
         return {"cmd": "error", "src": "push_subscribe", "val": "subscription must include endpoint, keys.p256dh and keys.auth"}
 
-    # Extract fingerprint data from WebSocket headers
-    request = ws_data.get("request")
+    request = _get_ws_attr(ws, "request")
     device_fingerprint = ""
     if request:
         headers = request.headers
@@ -199,10 +169,8 @@ async def handle_push_subscribe(ws, message: dict, server_data: dict) -> dict:
         return {"cmd": "error", "src": "push_subscribe", "val": "Failed to save subscription"}
 
 
-async def handle_push_unsubscribe(ws, message: dict, server_data: dict) -> dict:
-    _ws_data = server_data.get("_ws_data", {}) if server_data else {}
-    ws_data = _ws_data.get(id(ws), {})
-    username = ws_data.get("username")
+async def handle_push_unsubscribe(ws, message: dict) -> dict:
+    username = _get_ws_attr(ws, "username")
     if not username:
         return {"cmd": "error", "src": "push_unsubscribe", "val": "Not authenticated"}
 

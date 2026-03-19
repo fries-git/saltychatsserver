@@ -149,3 +149,136 @@ def validate_option_value(option_name, value, option):
             allowed_values = ", ".join(option.choices)
             return False, f"Invalid value for argument '{option_name}': expected one of [{allowed_values}], got '{value}'"
     return True, None
+
+
+def validate_embed(embed: dict) -> tuple[bool, str | None]:
+    if not isinstance(embed, dict):
+        return False, "Embed must be an object"
+
+    if len(embed) > 25:
+        return False, "Embed cannot have more than 25 fields"
+
+    if "title" in embed:
+        if not isinstance(embed["title"], str):
+            return False, "Embed title must be a string"
+        if len(embed["title"]) > 256:
+            return False, "Embed title cannot exceed 256 characters"
+
+    if "description" in embed:
+        if not isinstance(embed["description"], str):
+            return False, "Embed description must be a string"
+        if len(embed["description"]) > 4096:
+            return False, "Embed description cannot exceed 4096 characters"
+
+    if "url" in embed:
+        if not isinstance(embed["url"], str):
+            return False, "Embed url must be a string"
+
+    if "color" in embed:
+        if not isinstance(embed["color"], int):
+            return False, "Embed color must be an integer"
+        if embed["color"] < 0 or embed["color"] > 16777215:
+            return False, "Embed color must be between 0 and 16777215"
+
+    if "timestamp" in embed:
+        if not isinstance(embed["timestamp"], str):
+            return False, "Embed timestamp must be a string"
+
+    if "author" in embed:
+        author = embed["author"]
+        if not isinstance(author, dict):
+            return False, "Embed author must be an object"
+        if "name" in author:
+            if not isinstance(author["name"], str):
+                return False, "Embed author name must be a string"
+            if len(author["name"]) > 256:
+                return False, "Embed author name cannot exceed 256 characters"
+        if "url" in author and not isinstance(author["url"], str):
+            return False, "Embed author url must be a string"
+        if "icon_url" in author and not isinstance(author["icon_url"], str):
+            return False, "Embed author icon_url must be a string"
+
+    if "footer" in embed:
+        footer = embed["footer"]
+        if not isinstance(footer, dict):
+            return False, "Embed footer must be an object"
+        if "text" in footer:
+            if not isinstance(footer["text"], str):
+                return False, "Embed footer text must be a string"
+            if len(footer["text"]) > 2048:
+                return False, "Embed footer text cannot exceed 2048 characters"
+        if "icon_url" in footer and not isinstance(footer["icon_url"], str):
+            return False, "Embed footer icon_url must be a string"
+
+    if "image" in embed:
+        image = embed["image"]
+        if not isinstance(image, dict):
+            return False, "Embed image must be an object"
+        if "url" in image and not isinstance(image["url"], str):
+            return False, "Embed image url must be a string"
+
+    if "thumbnail" in embed:
+        thumbnail = embed["thumbnail"]
+        if not isinstance(thumbnail, dict):
+            return False, "Embed thumbnail must be an object"
+        if "url" in thumbnail and not isinstance(thumbnail["url"], str):
+            return False, "Embed thumbnail url must be a string"
+
+    if "fields" in embed:
+        fields = embed["fields"]
+        if not isinstance(fields, list):
+            return False, "Embed fields must be an array"
+        if len(fields) > 25:
+            return False, "Embed cannot have more than 25 fields"
+
+        for i, field in enumerate(fields):
+            if not isinstance(field, dict):
+                return False, f"Embed field {i} must be an object"
+            if "name" not in field:
+                return False, f"Embed field {i} is missing required 'name'"
+            if "value" not in field:
+                return False, f"Embed field {i} is missing required 'value'"
+            if not isinstance(field["name"], str):
+                return False, f"Embed field {i} name must be a string"
+            if not isinstance(field["value"], str):
+                return False, f"Embed field {i} value must be a string"
+            if len(field["name"]) > 256:
+                return False, f"Embed field {i} name cannot exceed 256 characters"
+            if len(field["value"]) > 1024:
+                return False, f"Embed field {i} value cannot exceed 1024 characters"
+            if "inline" in field and not isinstance(field["inline"], bool):
+                return False, f"Embed field {i} inline must be a boolean"
+
+    total_chars = 0
+    if "title" in embed:
+        total_chars += len(embed["title"])
+    if "description" in embed:
+        total_chars += len(embed["description"])
+    if "fields" in embed:
+        for field in embed["fields"]:
+            total_chars += len(field.get("name", ""))
+            total_chars += len(field.get("value", ""))
+    if "footer" in embed and "text" in embed["footer"]:
+        total_chars += len(embed["footer"]["text"])
+    if "author" in embed and "name" in embed["author"]:
+        total_chars += len(embed["author"]["name"])
+
+    if total_chars > 6000:
+        return False, "Embed total characters cannot exceed 6000"
+
+    return True, None
+
+
+def validate_embeds(embeds: list) -> tuple[bool, str | None]:
+    if not isinstance(embeds, list):
+        return False, "Embeds must be an array"
+
+    if len(embeds) > 10:
+        return False, "Cannot have more than 10 embeds"
+
+    for i, embed in enumerate(embeds):
+        is_valid, error = validate_embed(embed)
+        if not is_valid:
+            return False, f"Embed {i}: {error}"
+
+    return True, None

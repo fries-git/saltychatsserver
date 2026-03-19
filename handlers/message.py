@@ -1,5 +1,11 @@
-from db import channels, users, roles, serverEmojis, threads, webhooks as webhooks_db
+from db import channels, users, roles, serverEmojis, threads
 import time, uuid, sys, os, asyncio, json, re
+from handlers.messages.webhook import handle_webhook_create, handle_webhook_get, handle_webhook_list, handle_webhook_delete, handle_webhook_update, handle_webhook_regenerate
+from handlers.messages.emoji import handle_emoji_add, handle_emoji_delete, handle_emoji_get_all, handle_emoji_update, handle_emoji_get_filename, handle_emoji_get_id
+from handlers.messages.role import handle_role_create, handle_role_update, handle_role_delete, handle_roles_list, handle_role_permissions_set, handle_role_permissions_get
+from handlers.messages.slash import handle_slash_register, handle_slash_list, handle_slash_call, handle_slash_response
+from handlers.messages.channel import handle_channels_get, handle_channel_create, handle_channel_update, handle_channel_move, handle_channel_delete
+from handlers.messages.rate_limit import handle_rate_limit_status, handle_rate_limit_reset
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logger import Logger
 from config_store import get_config_value
@@ -9,6 +15,7 @@ from schemas.slash_command_schema import SlashCommand
 from schemas.server_emoji_schema import Emoji_add, Emoji_delete, Emoji_get_all, Emoji_update, Emoji_get_filename, Emoji_get_id
 from handlers.websocket_utils import broadcast_to_voice_channel_with_viewers, broadcast_to_all, _get_ws_attr, _set_ws_attr
 from handlers import push as push_handler
+from handlers.helpers.validation import validate_embeds
 from typing import TypeVar
 import copy
 
@@ -373,6 +380,7 @@ async def handle(ws, message, server_data=None):
                 thread_id = message.get("thread_id")
                 content = message.get("content")
                 reply_to = message.get("reply_to")
+                embeds = message.get("embeds")
                 user_id = _get_ws_attr(ws, "user_id")
 
                 if (not channel_name and not thread_id) or not content or not user_id:
@@ -388,6 +396,11 @@ async def handle(ws, message, server_data=None):
                 content = content.strip()
                 if not content:
                     return _error("Message content cannot be empty", match_cmd)
+
+                if embeds:
+                    is_valid, error_msg = validate_embeds(embeds)
+                    if not is_valid:
+                        return _error(error_msg, match_cmd)
 
                 # Check message length limit from config
                 max_length = _config_value(server_data, "limits", "post_content", default=2000)
@@ -450,6 +463,9 @@ async def handle(ws, message, server_data=None):
                     "pinned": False,
                     "id": str(uuid.uuid4())
                 }
+
+                if embeds:
+                    out_msg["embeds"] = embeds
 
                 if reply_to and replied_message:
                     out_msg["reply_to"] = {
@@ -547,11 +563,11 @@ async def handle(ws, message, server_data=None):
                             )
 
                 if thread_id:
-                    return {"cmd": "message_new", "message": out_msg_for_client, "thread_id": thread_id, "global": True}
+                    return {"cmd": "message_new", "message": out_msg_for_client, "channel": channel_name, "thread_id": thread_id, "global": True}
                 else:
                     return {"cmd": "message_new", "message": out_msg_for_client, "channel": channel_name, "global": True}
             case "typing":
-                user_id, error = _require_user_id(ws, server_data)
+                user_id, error = _require_user_id(ws)
                 if error:
                     return error
 
@@ -578,46 +594,52 @@ async def handle(ws, message, server_data=None):
 
                 return {"cmd": "typing", "user": username, "channel": channel_name, "global": True}
             case "message_edit":
-                user_id, error = _require_user_id(ws, server_data)
+                user_id, error = _require_user_id(ws)
                 if error:
                     return error
-                
+
                 if server_data and server_data.get("rate_limiter"):
                     is_allowed, reason, wait_time = server_data["rate_limiter"].is_allowed(user_id)
                     if not is_allowed:
                         wait_time_ms = int(wait_time * 1000)
                         return {"cmd": "rate_limit", "length": wait_time_ms}
-                
+
                 message_id = message.get("id")
                 channel_name = message.get("channel")
                 thread_id = message.get("thread_id")
                 new_content = message.get("content")
+                embeds = message.get("embeds")
                 if not message_id or (not channel_name and not thread_id) or not new_content:
                     return _error("Invalid message edit format", match_cmd)
-                
+
+                if embeds:
+                    is_valid, error_msg = validate_embeds(embeds)
+                    if not is_valid:
+                        return _error(error_msg, match_cmd)
+
                 user_roles, error = _require_user_roles(user_id)
                 if error:
                     return error
-                
+
                 ctx, err = _get_channel_or_thread_context(channel_name, thread_id, user_id, user_roles)
                 if err:
                     msg, key = err
                     return _error(msg, match_cmd)
-                
+
                 if not ctx:
                     return _error("Channel or thread not found", match_cmd)
 
                 is_thread = ctx["is_thread"]
                 parent_channel = ctx.get("parent_channel") or ctx.get("channel")
-                
+
                 if is_thread and thread_id:
                     msg_obj = threads.get_thread_message(thread_id, message_id)
                 else:
                     msg_obj = channels.get_channel_message(channel_name, message_id)
-                
+
                 if not msg_obj:
                     return _error("Message not found or cannot be edited", match_cmd)
-                
+
                 if msg_obj.get("user") == user_id:
                     if not channels.can_user_edit_own(parent_channel, user_roles):
                         return _error(f"You do not have permission to edit your own message in this {'thread' if is_thread else 'channel'}", match_cmd)
@@ -629,7 +651,7 @@ async def handle(ws, message, server_data=None):
                     return _error(error_msg, match_cmd)
 
                 if is_thread and thread_id:
-                    if not threads.edit_thread_message(thread_id, message_id, new_content):
+                    if not threads.edit_thread_message(thread_id, message_id, new_content, embeds):
                         return _error("Failed to edit message", match_cmd)
                     if server_data:
                         username = users.get_username_by_id(user_id)
@@ -647,9 +669,11 @@ async def handle(ws, message, server_data=None):
                         pings = get_message_pings(new_content, user_roles)
                         if pings.get("users") or pings.get("roles"):
                             edited_msg["pings"] = pings
+                        if embeds:
+                            edited_msg["embeds"] = embeds
                     return {"cmd": "message_edit", "id": message_id, "content": new_content, "message": edited_msg, "channel": parent_channel, "thread_id": thread_id, "global": True}
                 else:
-                    if not channels.edit_channel_message(channel_name, message_id, new_content):
+                    if not channels.edit_channel_message(channel_name, message_id, new_content, embeds):
                         return _error("Failed to edit message", match_cmd)
                     if server_data:
                         username = users.get_username_by_id(user_id)
@@ -667,9 +691,11 @@ async def handle(ws, message, server_data=None):
                         pings = get_message_pings(new_content, user_roles)
                         if pings.get("users") or pings.get("roles"):
                             edited_msg["pings"] = pings
-                    return {"cmd": "message_edit", "id": message_id, "content": new_content, "message": edited_msg, "channel": channel_name, "global": True}
+                        if embeds:
+                            edited_msg["embeds"] = embeds
+                return {"cmd": "message_edit", "id": message_id, "content": new_content, "message": edited_msg, "channel": channel_name, "global": True}
             case "message_delete":
-                user_id, error = _require_user_id(ws, server_data)
+                user_id, error = _require_user_id(ws)
                 if error:
                     return error
                 
@@ -804,7 +830,7 @@ async def handle(ws, message, server_data=None):
                 if not channel_name:
                     return _error("Channel name not provided", match_cmd)
                 
-                user_id, error = _require_user_id(ws, server_data)
+                user_id, error = _require_user_id(ws)
                 if error:
                     return error
                 _, error = _require_text_channel_access(user_id, channel_name)
@@ -822,7 +848,7 @@ async def handle(ws, message, server_data=None):
                 if not channel_name or not query:
                     return _error("Channel name and query are required", match_cmd)
                 
-                user_id, error = _require_user_id(ws, server_data)
+                user_id, error = _require_user_id(ws)
                 if error:
                     return error
                 _, error = _require_text_channel_access(user_id, channel_name)
@@ -936,7 +962,7 @@ async def handle(ws, message, server_data=None):
                 limit = message.get("limit", 100)
                 end = start + limit
 
-                user_id, error = _require_user_id(ws, server_data)
+                user_id, error = _require_user_id(ws)
                 if error:
                     return error
                 
@@ -974,7 +1000,7 @@ async def handle(ws, message, server_data=None):
                 if not message_id or (not channel_name and not thread_id):
                     return _error("Channel/thread and message ID are required", match_cmd)
 
-                user_id, error = _require_user_id(ws, server_data)
+                user_id, error = _require_user_id(ws)
                 if error:
                     return error
 
@@ -1017,7 +1043,7 @@ async def handle(ws, message, server_data=None):
                 if not channel_name or not message_id:
                     return _error("Channel name and message ID are required", match_cmd)
 
-                user_id, error = _require_user_id(ws, server_data)
+                user_id, error = _require_user_id(ws)
                 if error:
                     return error
                 _, error = _require_text_channel_access(user_id, channel_name)
@@ -1030,35 +1056,7 @@ async def handle(ws, message, server_data=None):
                 replies = channels.convert_messages_to_user_format(replies)
                 return {"cmd": "message_replies", "channel": channel_name, "message_id": message_id, "replies": replies}
             case "channels_get":
-                # Handle request for available channels
-                user_id, error = _require_user_id(ws, server_data)
-                if error:
-                    return error
-                user_data = users.get_user(user_id)
-                if not user_data:
-                    return _error("User not found", match_cmd)
-                channels_list = channels.get_all_channels_for_roles(user_data.get("roles", []))
-                
-                if server_data:
-                    voice_channels = server_data.get("voice_channels", {})
-                    for channel in channels_list:
-                        if channel.get("type") == "text":
-                            channel_name = channel.get("name")
-                            # add timestamp for most recent message
-                            msgs = channels.get_channel_messages(channel_name, 0, 1)
-                            msg = msgs[0] if msgs else {}
-                            channel["last_message"] = msg.get("timestamp")
-                        elif channel.get("type") == "voice":
-                                channel_name = channel.get("name")
-                                participants = []
-                                for uid, data in voice_channels.get(channel_name, {}).items():
-                                    participants.append({
-                                        "username": data.get("username", ""),
-                                        "muted": data.get("muted", False)
-                                    })
-                                channel["voice_state"] = participants
-                
-                return {"cmd": "channels_get", "val": channels_list}
+                return handle_channels_get(ws, message, match_cmd, server_data)
             case "user_timeout":
                 # Handle request to set timeout for a user
                 user_id, error = _require_user_id(ws, "Authentication required")
@@ -1189,7 +1187,7 @@ async def handle(ws, message, server_data=None):
                 return {"cmd": "user_leave", "user": username, "val": "User left server"}
             case "users_list":
                 # Handle request for all users list
-                _, error = _require_user_id(ws, server_data)
+                _, error = _require_user_id(ws)
                 if error:
                     return error
 
@@ -1197,7 +1195,7 @@ async def handle(ws, message, server_data=None):
                 return {"cmd": "users_list", "users": users_list}
             case "users_online":
                 # Handle request for online users list
-                _, error = _require_user_id(ws, server_data)
+                _, error = _require_user_id(ws)
                 if error:
                     return error
 
@@ -1239,7 +1237,7 @@ async def handle(ws, message, server_data=None):
                 return {"cmd": "users_online", "users": online_users}
             case "plugins_list":
                 # Handle request for loaded plugins (admin only)
-                user_id, error = _require_user_id(ws, server_data)
+                user_id, error = _require_user_id(ws)
                 if error:
                     return error
                 _, error = _require_user_roles(user_id, requiredRoles=["owner"])
@@ -1253,7 +1251,7 @@ async def handle(ws, message, server_data=None):
                 return {"cmd": "plugins_list", "plugins": plugins}
             case "plugins_reload":
                 # Handle request to reload plugins (admin only)
-                user_id, error = _require_user_id(ws, server_data)
+                user_id, error = _require_user_id(ws)
                 if error:
                     return error
                 _, error = _require_user_roles(user_id, requiredRoles=["owner"])
@@ -1276,324 +1274,17 @@ async def handle(ws, message, server_data=None):
                     server_data["plugin_manager"].reload_all_plugins()
                     return {"cmd": "plugins_reload", "val": "All plugins reloaded successfully"}
             case "rate_limit_status":
-                # Handle request for rate limit status (admin or self)
-                user_id, error = _require_user_id(ws, server_data)
-                if error:
-                    return error
-                
-                target_user = message.get("user", user_id)  # Default to self
-                # Resolve username to ID if needed
-                target_id = users.get_id_by_username(target_user) or target_user
-                user_roles, _ = _require_user_roles(user_id)
-                
-                # Allow users to check their own status, or admins to check anyone's
-                if target_id != user_id and (not user_roles or "owner" not in user_roles):
-                    return _error("Access denied: can only check your own rate limit status", match_cmd)
-                
-                if not server_data or not server_data.get("rate_limiter"):
-                    return _error("Rate limiter not available or disabled", match_cmd)
-                
-                status = server_data["rate_limiter"].get_user_status(target_id)
-                # Return username for display
-                status_username = users.get_username_by_id(target_id)
-                return {"cmd": "rate_limit_status", "user": status_username, "status": status}
+                return handle_rate_limit_status(ws, message, match_cmd, server_data)
             case "rate_limit_reset":
-                # Handle request to reset rate limit for a user (admin only)
-                user_id, error = _require_user_id(ws, server_data)
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-                
-                target_user = message.get("user")
-                if not target_user:
-                    return _error("User parameter is required", match_cmd)
-                
-                # Resolve username to ID if needed
-                target_id = users.get_id_by_username(target_user) or target_user
-                target_display = users.get_username_by_id(target_id)
-                
-                if not server_data or not server_data.get("rate_limiter"):
-                    return _error("Rate limiter not available or disabled", match_cmd)
-                
-                server_data["rate_limiter"].reset_user(target_id)
-                return {"cmd": "rate_limit_reset", "user": target_display, "val": f"Rate limit reset for user {target_display}"}
+                return handle_rate_limit_reset(ws, message, match_cmd, server_data)
             case "slash_register":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-
-                user_roles, error = _require_user_roles(user_id)
-                if error:
-                    return error
-
-                commands = message.get("commands")
-                if not commands or not isinstance(commands, list):
-                    return _error("Commands must be provided as a list", match_cmd)
-
-                if not server_data:
-                    return _error("No server data provided", match_cmd)
-
-                slash_commands = server_data["slash_commands"]
-                connected_clients = server_data.get("connected_clients")
-
-                username = users.get_username_by_id(user_id)
-
-                _ws_data_all = server_data.get("_ws_data", {})
-                for client_ws in connected_clients:
-                    if client_ws != ws:
-                        client_ws_data = _ws_data_all.get(id(client_ws), {})
-                        client_user_id = client_ws_data.get("user_id")
-                        if client_user_id == user_id:
-                            return _error("You already have slash commands registered from another session", match_cmd)
-
-                slash_commands[id(ws)] = {}
-
-                registered_commands = []
-                for cmd in commands:
-                    try:
-                        validatedCommand = SlashCommand.model_validate(cmd)
-                    except ValidationError as e:
-                        return _error(f"Invalid command schema: {str(e)}", match_cmd)
-
-                    command_data = {
-                        "command": validatedCommand,
-                        "user_id": user_id,
-                        "username": username
-                    }
-                    slash_commands[id(ws)][validatedCommand.name] = command_data
-                    Logger.info(f"Registered slash command for user {username} ({user_id}): {validatedCommand.name}")
-                    registered_commands.append({
-                        "name": validatedCommand.name,
-                        "description": validatedCommand.description,
-                        "options": [opt.model_dump() for opt in validatedCommand.options],
-                        "whitelistRoles": validatedCommand.whitelistRoles,
-                        "blacklistRoles": validatedCommand.blacklistRoles,
-                        "ephemeral": validatedCommand.ephemeral,
-                        "registeredBy": username
-                    })
-
-                if connected_clients and registered_commands:
-                    await broadcast_to_all(connected_clients, {
-                        "cmd": "slash_add",
-                        "commands": registered_commands
-                    })
-
-                return {"cmd": "slash_register", "val": f"{len(commands)} commands registered successfully"}
+                return await handle_slash_register(ws, message, match_cmd, server_data)
             case "slash_list":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-
-                user_roles, error = _require_user_roles(user_id)
-                if error:
-                    return error
-
-                if not server_data:
-                    return _error("No server data provided", match_cmd)
-
-                slash_commands = server_data["slash_commands"]
-                commands_list = []
-
-                for key, value in slash_commands.items():
-                    for cmd_name, cmd_data in value.items():
-                        command_obj = cmd_data["command"]
-                        commands_list.append({
-                            "name": command_obj.name,
-                            "description": command_obj.description,
-                            "options": [opt.model_dump() if hasattr(opt, "model_dump") else opt for opt in getattr(command_obj, "options", [])],
-                            "whitelistRoles": getattr(command_obj, "whitelistRoles", None),
-                            "blacklistRoles": getattr(command_obj, "blacklistRoles", None),
-                            "ephemeral": getattr(command_obj, "ephemeral", False),
-                            "registeredBy": cmd_data.get("username", "originChats")
-                        })
-
-                return {"cmd": "slash_list", "commands": commands_list}
+                return handle_slash_list(ws, message, match_cmd, server_data)
             case "slash_call":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-
-                user_roles, error = _require_user_roles(user_id)
-                if error:
-                    return error
-
-                if not server_data:
-                    return _error("No server data provided", match_cmd)
-
-                channel = message.get("channel")
-                if not channel:
-                    return _error("Channel parameter is required for slash commands", match_cmd)
-
-                cmd_name = message.get("command")
-                args = message.get("args", {})
-                if not isinstance(args, dict):
-                    return {"cmd": "error", "val": "Command args must be an object"}
-
-                if not isinstance(cmd_name, str):
-                    return _error("Command name must be a string", match_cmd)
-
-                # Check for server-side slash commands first
-                if slash_handlers.handler_exists(cmd_name):
-                    cmd_roles = slash_handlers.get_command_roles(cmd_name)
-                    whitelist = cmd_roles.get("whitelist")
-                    blacklist = cmd_roles.get("blacklist")
-
-                    if blacklist and user_roles:
-                        if any(role in blacklist for role in user_roles):
-                            return _error("Access denied: forbidden roles", match_cmd)
-
-                    if whitelist:
-                        if not user_roles or not any(role in whitelist for role in user_roles):
-                            return _error(f"Access denied: '{whitelist[0]}' role required", match_cmd)
-
-                handler = slash_handlers.get_handler(cmd_name)
-                is_async = slash_handlers.is_async_handler(cmd_name)
-                if handler:
-                    try:
-                        invoker_username = users.get_username_by_id(user_id)
-                        if is_async:
-                            result = await handler(ws, args, channel, server_data)
-                        else:
-                            result = handler(ws, args, channel, server_data)
-
-                        if "error" in result:
-                            return _error(result["error"], match_cmd)
-
-                        response_text = result.get("response", "")
-
-                        out_msg = {
-                            "user": "originChats",
-                            "content": response_text,
-                            "timestamp": time.time(),
-                            "type": "message",
-                            "pinned": False,
-                            "id": str(uuid.uuid4()),
-                            "interaction": {
-                                "command": cmd_name,
-                                "username": invoker_username
-                            }
-                        }
-
-                        channels.save_channel_message(channel, out_msg)
-                        out_msg_for_client = channels.convert_messages_to_user_format([out_msg])[0]
-                        out_msg_for_client["interaction"] = out_msg["interaction"]
-
-                        return {"cmd": "message_new", "message": out_msg_for_client, "channel": channel, "global": True}
-
-                    except Exception as e:
-                        Logger.error(f"Error executing server slash command /{cmd_name}: {str(e)}")
-                        return _error(f"Error executing command: {str(e)}", match_cmd)
-
-                slash_commands = server_data["slash_commands"]
-                command_data = None
-                for user_commands in slash_commands.values():
-                    if cmd_name in user_commands:
-                        command_data = user_commands[cmd_name]
-                        break
-
-                if not command_data:
-                    return _error(f"Unknown slash command: /{cmd_name}", match_cmd)
-
-                command = command_data["command"]
-                user_roles, error = _require_user_roles(user_id, requiredRoles=command.whitelistRoles or [], forbiddenRoles=command.blacklistRoles or [])
-                if error:
-                    return error
-
-                options = {option.name: option for option in command.options}
-
-                for argument_name in args:
-                    if argument_name not in options:
-                        return _error(f"Unknown argument: {argument_name}", match_cmd)
-
-                for option in command.options:
-                    if option.required and option.name not in args:
-                        return _error(f"Missing required argument: {option.name}", match_cmd)
-
-                for optionName, value in args.items():
-                    option = options[optionName]
-
-                    is_valid, error_message = _validate_option_value(optionName, value, option)
-                    if not is_valid:
-                        return {"cmd": "error", "val": error_message}
-
-                commander_user_id = command_data["user_id"]
-                invoker_username = users.get_username_by_id(user_id)
-
-                connected_clients = server_data.get("connected_clients", [])
-                commander_ws = None
-
-                for client_ws in connected_clients:
-                    if _get_ws_attr(client_ws, "user_id") == commander_user_id:
-                        commander_ws = client_ws
-                        break
-
-                if not commander_ws:
-                    return _error(f"Command handler for /{cmd_name} is not currently connected", match_cmd)
-
-                slash_call_message = {
-                    "cmd": "slash_call",
-                    "val": {"command": cmd_name, "args": args, "commander": command_data["username"]},
-                    "invoker": user_id,
-                    "invokerUsername": invoker_username,
-                    "channel": channel
-                }
-
-                Logger.info(f"Sending slash_call to commander {commander_user_id} (username: {command_data['username']}) for command /{cmd_name}")
-
-                loop = asyncio.get_event_loop()
-                send_to_client_func = server_data.get("send_to_client")
-                if send_to_client_func:
-                    loop.create_task(send_to_client_func(commander_ws, slash_call_message))
-
-                return {"cmd": "slash_call_sent", "val": f"Command /{cmd_name} invoked"}
+                return await handle_slash_call(ws, message, match_cmd, server_data)
             case "slash_response":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-
-                user_roles, error = _require_user_roles(user_id)
-                if error:
-                    return error
-
-                channel = message.get("channel")
-                if not channel:
-                    return {"cmd": "error", "val": "Channel parameter is required for slash commands"}
-
-                response = message.get("response")
-                if not isinstance(response, str):
-                    return {"cmd": "error", "val": "Slash response must be a string"}
-
-                response = response.strip()
-                if not response:
-                    return {"cmd": "error", "val": "Slash response cannot be empty"}
-
-                command = message.get("command")
-                if not command or not isinstance(command, str):
-                    return {"cmd": "error", "val": "Command parameter is required for slash responses"}
-
-                invoker_id = message.get("invoker") or user_id
-                invoker_username = users.get_username_by_id(invoker_id)
-
-                out_msg = {
-                    "user": user_id,
-                    "content": response,
-                    "timestamp": time.time(),
-                    "type": "message",
-                    "pinned": False,
-                    "id": str(uuid.uuid4()),
-                    "interaction": {
-                        "command": command,
-                        "username": invoker_username
-                    }
-                }
-
-                channels.save_channel_message(channel, out_msg)
-                out_msg_for_client = channels.convert_messages_to_user_format([out_msg])[0]
-                out_msg_for_client["interaction"] = out_msg["interaction"]
-
-                return {"cmd": "message_new", "message": out_msg_for_client, "channel": channel, "global": True}
+                return handle_slash_response(ws, message, match_cmd, server_data)
             case "voice_join":
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
@@ -1689,7 +1380,7 @@ async def handle(ws, message, server_data=None):
                 if not voice_channels[current_channel]:
                     del voice_channels[current_channel]
 
-                _set_ws_attr(ws, server_data, "voice_channel", None)
+                _set_ws_attr(ws, "voice_channel", None)
 
                 return {"cmd": "voice_leave", "channel": current_channel}
 
@@ -1750,294 +1441,26 @@ async def handle(ws, message, server_data=None):
                         participants.append(participant)
                 
                 return {"cmd": "voice_state", "channel": channel_name, "participants": participants}
-            case "role_create":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                role_name = message.get("name")
-                if not role_name:
-                    return _error("Role name is required", match_cmd)
-
-                role_data = {}
-                if message.get("description"):
-                    role_data["description"] = message["description"]
-                if message.get("color"):
-                    role_data["color"] = message["color"]
-                if message.get("permissions"):
-                    role_data["permissions"] = message["permissions"]
-                if message.get("hoisted") is not None:
-                    role_data["hoisted"] = message["hoisted"]
-
-                if roles.role_exists(role_name):
-                    return _error("Role already exists", match_cmd)
-
-                created = roles.add_role(role_name, role_data)
-                if server_data:
-                    server_data["plugin_manager"].trigger_event("role_create", ws, {
-                        "role_name": role_name,
-                        "description": message.get("description", ""),
-                        "color": message.get("color")
-                    }, server_data)
-
-                return {"cmd": "role_create", "name": role_name, "created": created}
-            case "role_update":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                if not server_data:
-                    return _error("Server data not available", match_cmd)
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                role_name = message.get("name")
-                if not role_name:
-                    return _error("Role name is required", match_cmd)
-
-                if not roles.role_exists(role_name):
-                    return _error("Role not found", match_cmd)
-
-                role_data = roles.get_role(role_name)
-                if not role_data:
-                    return _error("Role not found", match_cmd)
-                
-                if message.get("description") is not None:
-                    role_data["description"] = message["description"]
-                if message.get("color") is not None:
-                    role_data["color"] = message["color"]
-                if message.get("hoisted") is not None:
-                    role_data["hoisted"] = message["hoisted"]
-
-                updated = roles.update_role(role_name, role_data)
-                if server_data:
-                    server_data["plugin_manager"].trigger_event("role_update", ws, {
-                        "role_name": role_name,
-                        "description": role_data.get("description", ""),
-                        "color": role_data.get("color")
-                    }, server_data)
-
-                return {"cmd": "role_update", "name": role_name, "updated": updated}
-            case "role_delete":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                role_name = message.get("name")
-                if not role_name:
-                    return _error("Role name is required", match_cmd)
-
-                if not roles.role_exists(role_name):
-                    return _error("Role not found", match_cmd)
-
-                if role_name in ["owner", "admin", "user"]:
-                    return _error("Cannot delete system roles", match_cmd)
-
-                all_users = users.get_users()
-                for user in all_users:
-                    if role_name in user.get("roles", []):
-                        return _error(f"Role is assigned to user '{user.get('username')}'", match_cmd)
-
-                all_channels = channels.get_channels()
-                for channel in all_channels:
-                    perms = channel.get("permissions", {})
-                    for perm_type, perm_roles in perms.items():
-                        if isinstance(perm_roles, list) and role_name in perm_roles:
-                            return _error(f"Role is used in channel '{channel.get('name')}' permissions", match_cmd)
-
-                deleted = roles.delete_role(role_name)
-                if server_data:
-                    server_data["plugin_manager"].trigger_event("role_delete", ws, {
-                        "role_name": role_name
-                    }, server_data)
-
-                return {"cmd": "role_delete", "name": role_name, "deleted": deleted}
             case "roles_list":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-
-                all_roles = roles.get_all_roles()
-                return {"cmd": "roles_list", "roles": all_roles}
+                return handle_roles_list(ws, message, match_cmd)
+            case "role_create":
+                return handle_role_create(ws, message, match_cmd, server_data)
+            case "role_update":
+                return handle_role_update(ws, message, match_cmd, server_data)
+            case "role_delete":
+                return handle_role_delete(ws, message, match_cmd, server_data)
             case "role_permissions_set":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                role_name = message.get("name")
-                if not role_name:
-                    return _error("Role name is required", match_cmd)
-
-                if not roles.role_exists(role_name):
-                    return _error("Role not found", match_cmd)
-
-                permissions = message.get("permissions")
-                if not isinstance(permissions, dict):
-                    return _error("Permissions must be an object", match_cmd)
-
-                role_data = roles.get_role(role_name)
-                if not role_data:
-                    return _error("Role not found", match_cmd)
-                role_data["permissions"] = permissions
-                updated = roles.update_role(role_name, role_data)
-
-                return {"cmd": "role_permissions_set", "name": role_name, "permissions": permissions, "updated": updated}
+                return handle_role_permissions_set(ws, message, match_cmd)
             case "role_permissions_get":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-
-                role_name = message.get("name")
-                if not role_name:
-                    return _error("Role name is required", match_cmd)
-
-                if not roles.role_exists(role_name):
-                    return _error("Role not found", match_cmd)
-
-                role_perms = roles.get_role_permissions(role_name)
-                return {"cmd": "role_permissions_get", "name": role_name, "permissions": role_perms}
+                return handle_role_permissions_get(ws, message, match_cmd)
             case "channel_create":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                channel_name = message.get("name")
-                channel_type = message.get("type")
-
-                if not channel_name:
-                    return _error("Channel name is required", match_cmd)
-                if not channel_type:
-                    return _error("Channel type is required (text, voice, or separator)", match_cmd)
-                if channel_type not in ["text", "voice", "separator"]:
-                    return _error("Invalid channel type, must be text, voice, or separator", match_cmd)
-
-                if channels.channel_exists(channel_name):
-                    return _error("Channel already exists", match_cmd)
-
-                created = channels.create_channel(
-                    channel_name, 
-                    channel_type,
-                    description=message.get("description"),
-                    wallpaper=message.get("wallpaper"),
-                    permissions=message.get("permissions"),
-                    size=message.get("size") if channel_type == "separator" else None
-                )
-
-                if created:
-                    channel_data = channels.get_channel(channel_name)
-                    if server_data:
-                        server_data["plugin_manager"].trigger_event("channel_create", ws, {
-                            "channel": channel_data
-                        }, server_data)
-                    return {"cmd": "channel_create", "channel": channel_data, "created": created}
-
-                return _error("Failed to create channel", match_cmd)
+                return handle_channel_create(ws, message, match_cmd, server_data)
             case "channel_update":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                current_name = message.get("current_name")
-                updates = message.get("updates")
-
-                if not current_name:
-                    return _error("current_name is required", match_cmd)
-                if not updates or not isinstance(updates, dict):
-                    return _error("updates object is required", match_cmd)
-
-                if not channels.channel_exists(current_name):
-                    return _error("Channel not found", match_cmd)
-
-                if "type" in updates and updates["type"] not in ["text", "voice", "separator"]:
-                    return _error("Invalid channel type", match_cmd)
-
-                if "name" in updates and updates["name"] != current_name:
-                    if channels.channel_exists(updates["name"]):
-                        return _error("Channel with new name already exists", match_cmd)
-
-                updated = channels.update_channel(current_name, updates)
-                if updated:
-                    channel = channels.get_channel(updates.get("name", current_name))
-                    if server_data:
-                        server_data["plugin_manager"].trigger_event("channel_update", ws, {
-                            "old_name": current_name,
-                            "channel": channel
-                        }, server_data)
-                    return {"cmd": "channel_update", "channel": channel, "updated": updated}
-
-                return _error("Failed to update channel", match_cmd)
+                return handle_channel_update(ws, message, match_cmd, server_data)
             case "channel_move":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                channel_name = message.get("name")
-                new_position = message.get("position")
-
-                if not channel_name:
-                    return _error("Channel name is required", match_cmd)
-                if new_position is None:
-                    return _error("Position is required", match_cmd)
-
-                if not isinstance(new_position, int) or new_position < 0:
-                    return _error("Position must be a non-negative integer", match_cmd)
-
-                moved = channels.reorder_channel(channel_name, new_position)
-                if server_data and moved:
-                    channel = channels.get_channel(channel_name)
-                    server_data["plugin_manager"].trigger_event("channel_move", ws, {
-                        "channel": channel,
-                        "position": new_position
-                    }, server_data)
-
-                return {"cmd": "channel_move", "name": channel_name, "position": new_position, "moved": moved}
+                return handle_channel_move(ws, message, match_cmd, server_data)
             case "channel_delete":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                channel_name = message.get("name")
-                if not channel_name:
-                    return _error("Channel name is required", match_cmd)
-
-                if not channels.channel_exists(channel_name):
-                    channel_name_lower = channel_name.lower()
-                    all_channels = channels.get_channels()
-                    for channel in all_channels:
-                        if channel.get("name", "").lower() == channel_name_lower:
-                            channel_name = channel.get("name")
-                            break
-                    else:
-                        return _error("Channel not found", match_cmd)
-
-                deleted = channels.delete_channel(channel_name)
-                if server_data and deleted:
-                    server_data["plugin_manager"].trigger_event("channel_delete", ws, {
-                        "channel_name": channel_name
-                    }, server_data)
-
-                return {"cmd": "channel_delete", "name": channel_name, "deleted": deleted}
+                return handle_channel_delete(ws, message, match_cmd, server_data)
             case "user_roles_add":
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
@@ -2224,116 +1647,31 @@ async def handle(ws, message, server_data=None):
                     "total": len(pinged_messages)
                 }
             case "emoji_add":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-                
-                try:
-                    emoji_add_command = Emoji_add.model_validate(message)
-                    emoji_id = serverEmojis.add_emoji(emoji_add_command.name, emoji_add_command.image)
-                    if (emoji_id):
-                        return {"cmd": "emoji_add", "id": emoji_id, "added": True}
-                    else:
-                        return _error(f"Error adding emoji", match_cmd)
-                except ValidationError as e:
-                    return _error(f"Invalid emoji_add command scheme: {str(e)}", match_cmd)
+                return handle_emoji_add(ws, message, match_cmd)
             case "emoji_delete":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-                
-                try:
-                    emoji_delete_command = Emoji_delete.model_validate(message)
-                    deleted = serverEmojis.remove_emoji(emoji_delete_command.emoji_id, True)
-                    return {"cmd": "emoji_delete", "id": emoji_delete_command.emoji_id, "deleted": deleted}
-                except ValidationError as e:
-                    return _error(f"Invalid emoji_delete command scheme: {str(e)}", match_cmd)
+                return handle_emoji_delete(ws, message, match_cmd)
             case "emoji_get_all":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                try:
-                    Emoji_get_all.model_validate(message)
-                    all_emojis = serverEmojis.get_emojis()
-                    return {"cmd": "emoji_get_all", "emojis": all_emojis}
-                except ValidationError as e:
-                    return _error(f"Invalid emoji_get_all command scheme: {str(e)}", match_cmd)
+                return handle_emoji_get_all(ws, message, match_cmd)
             case "emoji_update":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                try:
-                    emoji_update_command = Emoji_update.model_validate(message)
-                    updates = {}
-                    if emoji_update_command.name is not None:
-                        updates["name"] = emoji_update_command.name
-                    if emoji_update_command.image is not None:
-                        updates["fileName"] = str(emoji_update_command.image)
-
-                    if not updates:
-                        return _error("At least one field to update is required (name or image)", match_cmd)
-
-                    updated = serverEmojis.update_emoji(emoji_update_command.emoji_id, updates)
-                    return {"cmd": "emoji_update", "id": emoji_update_command.emoji_id, "updated": updated}
-                except ValidationError as e:
-                    return _error(f"Invalid emoji_update command scheme: {str(e)}", match_cmd)
+                return handle_emoji_update(ws, message, match_cmd)
             case "emoji_get_filename":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                try:
-                    emoji_get_filename_command = Emoji_get_filename.model_validate(message)
-                    emoji_id = serverEmojis.get_emoji_id_by_name(emoji_get_filename_command.name)
-                    if emoji_id is None:
-                        return _error("Emoji not found", match_cmd)
-
-                    file_path = serverEmojis.get_emoji_file_name(emoji_id)
-                    if not file_path:
-                        return _error("Emoji file not found", match_cmd)
-
-                    return {"cmd": "emoji_get_filename", "name": emoji_get_filename_command.name, "filepath": file_path}
-                except ValidationError as e:
-                    return _error(f"Invalid emoji_get_filename command scheme: {str(e)}", match_cmd)
+                return handle_emoji_get_filename(ws, message, match_cmd)
             case "emoji_get_id":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                try:
-                    emoji_get_id_command = Emoji_get_id.model_validate(message)
-                    emoji_id = serverEmojis.get_emoji_id_by_name(emoji_get_id_command.name)
-                    if emoji_id is None:
-                        return _error("Emoji not found", match_cmd)
-                    return {"cmd": "emoji_get_id", "name": emoji_get_id_command.name, "id": emoji_id}
-                except ValidationError as e:
-                    return _error(f"Invalid emoji_get_id command scheme: {str(e)}", match_cmd)
+                return handle_emoji_get_id(ws, message, match_cmd)
+            case "slash_register":
+                return handle_slash_register(ws, message, match_cmd, server_data)
+            case "slash_list":
+                return handle_slash_list(ws, message, match_cmd, server_data)
+            case "slash_call":
+                return handle_slash_call(ws, message, match_cmd, server_data)
+            case "slash_response":
+                return handle_slash_response(ws, message, match_cmd, server_data)
             case "push_get_vapid":
                 return await push_handler.handle_push_get_vapid(ws)
             case "push_subscribe":
-                return await push_handler.handle_push_subscribe(ws, message, server_data)
+                return await push_handler.handle_push_subscribe(ws, message)
             case "push_unsubscribe":
-                return await push_handler.handle_push_unsubscribe(ws, message, server_data)
+                return await push_handler.handle_push_unsubscribe(ws, message)
             case "thread_create":
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
@@ -2493,7 +1831,7 @@ async def handle(ws, message, server_data=None):
                 return {"cmd": "thread_update", "thread": updated_thread, "global": True}
             case "thread_join":
                 user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
+                if not user_id or error:
                     return error
 
                 thread_id = message.get("thread_id")
@@ -2526,7 +1864,7 @@ async def handle(ws, message, server_data=None):
                 return {"cmd": "thread_join", "thread": updated_thread, "thread_id": thread_id, "user": username, "global": True}
             case "thread_leave":
                 user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
+                if not user_id or error:
                     return error
 
                 thread_id = message.get("thread_id")
@@ -2545,145 +1883,56 @@ async def handle(ws, message, server_data=None):
 
                 return {"cmd": "thread_leave", "thread": updated_thread, "thread_id": thread_id, "user": username, "global": True}
             case "webhook_create":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                user_roles, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                channel = message.get("channel")
-                name = message.get("name")
-                
-                if not channel:
-                    return _error("Channel is required", match_cmd)
-                if not name:
-                    return _error("Webhook name is required", match_cmd)
-
-                if not channels.channel_exists(channel):
-                    return _error("Channel not found", match_cmd)
-                
-                channel_info = channels.get_channel(channel)
-                if channel_info.get("type") != "text":
-                    return _error("Webhooks can only be created for text channels", match_cmd)
-
-                webhook = webhooks_db.create_webhook(channel, name, user_id)
-                if not webhook:
-                    return _error("Failed to create webhook", match_cmd)
-                
-                display_webhook = copy.deepcopy(webhook)
-                
-                return {"cmd": "webhook_create", "webhook": display_webhook}
+                return handle_webhook_create(ws, message, match_cmd)
             case "webhook_get":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-
-                webhook_id = message.get("id")
-                if not webhook_id:
-                    return _error("Webhook ID is required", match_cmd)
-
-                webhook = webhooks_db.get_webhook(webhook_id)
-                if not webhook:
-                    return _error("Webhook not found", match_cmd)
-
-                if "token" in webhook:
-                    del webhook["token"]
-
-                return {"cmd": "webhook_get", "webhook": webhook}
+                return handle_webhook_get(ws, message, match_cmd)
             case "webhook_list":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-
-                channel = message.get("channel")
-                
-                if channel:
-                    if not channels.channel_exists(channel):
-                        return _error("Channel not found", match_cmd)
-                    webhooks_list = webhooks_db.get_webhooks_for_channel(channel)
-                else:
-                    webhooks_list = webhooks_db.get_all_webhooks()
-
-                return {"cmd": "webhook_list", "webhooks": webhooks_list}
+                return handle_webhook_list(ws, message, match_cmd)
             case "webhook_delete":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                user_roles, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                webhook_id = message.get("id")
-                if not webhook_id:
-                    return _error("Webhook ID is required", match_cmd)
-
-                webhook = webhooks_db.get_webhook(webhook_id)
-                if not webhook:
-                    return _error("Webhook not found", match_cmd)
-
-                deleted = webhooks_db.delete_webhook(webhook_id)
-                if not deleted:
-                    return _error("Failed to delete webhook", match_cmd)
-
-                return {"cmd": "webhook_delete", "id": webhook_id, "deleted": True}
+                return handle_webhook_delete(ws, message, match_cmd)
             case "webhook_update":
-                user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                user_roles, error = _require_user_roles(user_id, requiredRoles=["owner"])
-                if error:
-                    return error
-
-                webhook_id = message.get("id")
-                if not webhook_id:
-                    return _error("Webhook ID is required", match_cmd)
-
-                webhook = webhooks_db.get_webhook(webhook_id)
-                if not webhook:
-                    return _error("Webhook not found", match_cmd)
-
-                updates = {}
-                if "name" in message:
-                    name = message["name"]
-                    if not name or not isinstance(name, str):
-                        return _error("Webhook name must be a non-empty string", match_cmd)
-                    updates["name"] = name.strip()
-                if "avatar" in message:
-                    updates["avatar"] = message["avatar"]
-
-                if not updates:
-                    return _error("No updates provided", match_cmd)
-
-                updated_webhook = webhooks_db.update_webhook(webhook_id, updates)
-                if not updated_webhook:
-                    return _error("Failed to update webhook", match_cmd)
-
-                return {"cmd": "webhook_update", "webhook": updated_webhook}
+                return handle_webhook_update(ws, message, match_cmd)
             case "webhook_regenerate":
+                return handle_webhook_regenerate(ws, message, match_cmd)
+            case "embeds_list":
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
                     return error
-                user_roles, error = _require_user_roles(user_id, requiredRoles=["owner"])
+
+                message_id = message.get("id")
+                channel = message.get("channel")
+                thread_id = message.get("thread_id")
+
+                if not message_id:
+                    return _error("Message ID is required", match_cmd)
+
+                if not channel and not thread_id:
+                    return _error("Channel or thread_id is required", match_cmd)
+
+                user_roles, error = _require_user_roles(user_id)
                 if error:
                     return error
 
-                webhook_id = message.get("id")
-                if not webhook_id:
-                    return _error("Webhook ID is required", match_cmd)
+                ctx, err = _get_channel_or_thread_context(channel, thread_id, user_id, user_roles)
+                if err:
+                    msg, key = err
+                    return _error(msg, match_cmd)
 
-                webhook = webhooks_db.get_webhook(webhook_id)
-                if not webhook:
-                    return _error("Webhook not found", match_cmd)
+                if not ctx:
+                    return _error("Channel or thread not found", match_cmd)
 
-                new_token = str(uuid.uuid4()) + str(uuid.uuid4()).replace("-", "")
-                
-                updated_webhook = webhooks_db.update_webhook(webhook_id, {"token": new_token})
-                if not updated_webhook:
-                    return _error("Failed to regenerate webhook token", match_cmd)
-                
-                webhook_with_token = webhooks_db.get_webhook(webhook_id)
+                is_thread = ctx["is_thread"]
 
-                return {"cmd": "webhook_regenerate", "webhook": webhook_with_token}
+                if is_thread and thread_id:
+                    msg_obj = threads.get_thread_message(thread_id, message_id)
+                else:
+                    msg_obj = channels.get_channel_message(channel, message_id)
+
+                if not msg_obj:
+                    return _error("Message not found", match_cmd)
+
+                embeds = msg_obj.get("embeds", [])
+
+                return {"cmd": "embeds_list", "id": message_id, "embeds": embeds}
             case _:
                 return _error(f"Unknown command: {message.get('cmd')}", match_cmd)

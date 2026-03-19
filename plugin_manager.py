@@ -93,29 +93,29 @@ class PluginManager:
 
         for handler_info in self.event_handlers[event]:
             try:
-
                 # Check permissions if required
                 required_permissions = handler_info.get('required_permission', [])
                 if required_permissions:
                     from db import users
                     from handlers.websocket_utils import _get_ws_attr
-                    username = _get_ws_attr(ws, server_data, "username")
-                    user_roles = users.get_user_roles(username)
+                    user_id = _get_ws_attr(ws, "user_id")
+                    user_roles = users.get_user_roles(user_id) if user_id else None
                     if not user_roles or not any(role in user_roles for role in required_permissions):
                         continue
-                
+
                 # Call the handler
                 handler = handler_info['handler']
-                
+
                 # Check handler signature to determine how to call it
                 sig = inspect.signature(handler)
-                
+
                 # Check if handler is async
                 if inspect.iscoroutinefunction(handler):
                     # For async handlers, we need to schedule them
                     import asyncio
                     try:
-                        loop = asyncio.get_event_loop()
+                        loop = asyncio.get_running_loop()
+                        # We have a running loop, use create_task
                         if len(sig.parameters) == 2:
                             asyncio.create_task(handler(ws, message_data))
                         elif len(sig.parameters) == 3:
@@ -123,13 +123,9 @@ class PluginManager:
                         else:
                             asyncio.create_task(handler(ws, message_data))
                     except RuntimeError:
-                        # No event loop running, create one
-                        if len(sig.parameters) == 2:
-                            asyncio.run(handler(ws, message_data))
-                        elif len(sig.parameters) == 3:
-                            asyncio.run(handler(ws, message_data, server_data))
-                        else:
-                            asyncio.run(handler(ws, message_data))
+                        # No event loop running - this shouldn't happen in normal operation
+                        # Log a warning and don't execute the async handler
+                        Logger.warning(f"No event loop running for async plugin handler '{handler_info['plugin_name']}'")
                 else:
                     # Synchronous handler
                     if len(sig.parameters) == 2:
@@ -139,7 +135,7 @@ class PluginManager:
                     else:
                         # Fallback: try with ws and message_data
                         handler(ws, message_data)
-                    
+
             except Exception as e:
                 Logger.error(f"Error in plugin '{handler_info['plugin_name']}' handler: {str(e)}")
                 import traceback

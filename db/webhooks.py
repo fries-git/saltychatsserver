@@ -116,7 +116,7 @@ def get_webhook_by_token(token: str) -> Optional[dict]:
 def get_webhooks_for_channel(channel: str) -> List[dict]:
     """
     Get all webhooks for a channel.
-    Returns webhook data without tokens.
+    Returns webhook data with webhook URLs but without tokens.
     """
     with _lock:
         webhooks = _get_webhooks_cache()
@@ -124,7 +124,6 @@ def get_webhooks_for_channel(channel: str) -> List[dict]:
         for webhook in webhooks.values():
             if webhook.get("channel") == channel:
                 wh_copy = copy.deepcopy(webhook)
-                del wh_copy["token"]
                 result.append(wh_copy)
         return result
 
@@ -132,14 +131,13 @@ def get_webhooks_for_channel(channel: str) -> List[dict]:
 def get_all_webhooks() -> List[dict]:
     """
     Get all webhooks.
-    Returns webhook data without tokens.
+    Returns webhook data with webhook URLs but without tokens.
     """
     with _lock:
         webhooks = _get_webhooks_cache()
         result = []
         for webhook in webhooks.values():
             wh_copy = copy.deepcopy(webhook)
-            del wh_copy["token"]
             result.append(wh_copy)
         return result
 

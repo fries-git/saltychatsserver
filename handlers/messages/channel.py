@@ -1,0 +1,173 @@
+from db import channels, users
+from handlers.messages.helpers import _error, _require_user_id, _require_user_roles
+
+
+def handle_channels_get(ws, message, match_cmd, server_data):
+    user_id, error = _require_user_id(ws)
+    if error:
+        return error
+    user_data = users.get_user(user_id)
+    if not user_data:
+        return _error("User not found", match_cmd)
+    channels_list = channels.get_all_channels_for_roles(user_data.get("roles", []))
+
+    if server_data:
+        voice_channels = server_data.get("voice_channels", {})
+        for channel in channels_list:
+            if channel.get("type") == "text":
+                channel_name = channel.get("name")
+                msgs = channels.get_channel_messages(channel_name, 0, 1)
+                msg = msgs[0] if msgs else {}
+                channel["last_message"] = msg.get("timestamp")
+            elif channel.get("type") == "voice":
+                channel_name = channel.get("name")
+                participants = []
+                for uid, data in voice_channels.get(channel_name, {}).items():
+                    participants.append({
+                        "username": data.get("username", ""),
+                        "muted": data.get("muted", False)
+                    })
+                channel["voice_state"] = participants
+
+    return {"cmd": "channels_get", "val": channels_list}
+
+
+def handle_channel_create(ws, message, match_cmd, server_data):
+    user_id, error = _require_user_id(ws, "Authentication required")
+    if error:
+        return error
+    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    if error:
+        return error
+
+    channel_name = message.get("name")
+    channel_type = message.get("type")
+
+    if not channel_name:
+        return _error("Channel name is required", match_cmd)
+    if not channel_type:
+        return _error("Channel type is required (text, voice, or separator)", match_cmd)
+    if channel_type not in ["text", "voice", "separator"]:
+        return _error("Invalid channel type, must be text, voice, or separator", match_cmd)
+
+    if channels.channel_exists(channel_name):
+        return _error("Channel already exists", match_cmd)
+
+    created = channels.create_channel(
+        channel_name,
+        channel_type,
+        description=message.get("description"),
+        wallpaper=message.get("wallpaper"),
+        permissions=message.get("permissions"),
+        size=message.get("size") if channel_type == "separator" else None
+    )
+
+    if created:
+        channel_data = channels.get_channel(channel_name)
+        if server_data:
+            server_data["plugin_manager"].trigger_event("channel_create", ws, {
+                "channel": channel_data
+            }, server_data)
+        return {"cmd": "channel_create", "channel": channel_data, "created": created}
+
+    return _error("Failed to create channel", match_cmd)
+
+
+def handle_channel_update(ws, message, match_cmd, server_data):
+    user_id, error = _require_user_id(ws, "Authentication required")
+    if error:
+        return error
+    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    if error:
+        return error
+
+    current_name = message.get("current_name")
+    updates = message.get("updates")
+
+    if not current_name:
+        return _error("current_name is required", match_cmd)
+    if not updates or not isinstance(updates, dict):
+        return _error("updates object is required", match_cmd)
+
+    if not channels.channel_exists(current_name):
+        return _error("Channel not found", match_cmd)
+
+    if "type" in updates and updates["type"] not in ["text", "voice", "separator"]:
+        return _error("Invalid channel type", match_cmd)
+
+    if "name" in updates and updates["name"] != current_name:
+        if channels.channel_exists(updates["name"]):
+            return _error("Channel with new name already exists", match_cmd)
+
+    updated = channels.update_channel(current_name, updates)
+    if updated:
+        channel = channels.get_channel(updates.get("name", current_name))
+        if server_data:
+            server_data["plugin_manager"].trigger_event("channel_update", ws, {
+                "old_name": current_name,
+                "channel": channel
+            }, server_data)
+        return {"cmd": "channel_update", "channel": channel, "updated": updated}
+
+    return _error("Failed to update channel", match_cmd)
+
+
+def handle_channel_move(ws, message, match_cmd, server_data):
+    user_id, error = _require_user_id(ws, "Authentication required")
+    if error:
+        return error
+    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    if error:
+        return error
+
+    channel_name = message.get("name")
+    new_position = message.get("position")
+
+    if not channel_name:
+        return _error("Channel name is required", match_cmd)
+    if new_position is None:
+        return _error("Position is required", match_cmd)
+
+    if not isinstance(new_position, int) or new_position < 0:
+        return _error("Position must be a non-negative integer", match_cmd)
+
+    moved = channels.reorder_channel(channel_name, new_position)
+    if server_data and moved:
+        channel = channels.get_channel(channel_name)
+        server_data["plugin_manager"].trigger_event("channel_move", ws, {
+            "channel": channel,
+            "position": new_position
+        }, server_data)
+
+    return {"cmd": "channel_move", "name": channel_name, "position": new_position, "moved": moved}
+
+
+def handle_channel_delete(ws, message, match_cmd, server_data):
+    user_id, error = _require_user_id(ws, "Authentication required")
+    if error:
+        return error
+    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    if error:
+        return error
+
+    channel_name = message.get("name")
+    if not channel_name:
+        return _error("Channel name is required", match_cmd)
+
+    if not channels.channel_exists(channel_name):
+        channel_name_lower = channel_name.lower()
+        all_channels = channels.get_channels()
+        for channel in all_channels:
+            if channel.get("name", "").lower() == channel_name_lower:
+                channel_name = channel.get("name")
+                break
+        else:
+            return _error("Channel not found", match_cmd)
+
+    deleted = channels.delete_channel(channel_name)
+    if server_data and deleted:
+        server_data["plugin_manager"].trigger_event("channel_delete", ws, {
+            "channel_name": channel_name
+        }, server_data)
+
+    return {"cmd": "channel_delete", "name": channel_name, "deleted": deleted}

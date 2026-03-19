@@ -15,8 +15,9 @@ DEFAULT_PERMISSIONS = {
     "view": ["owner"],
     "send": ["owner"],
     "delete": ["owner"],
-    "edit_own": ["owner"],
-    "react": ["owner"],
+    "delete_own": ["user"],
+    "edit_own": ["user"],
+    "react": ["user"],
     "pin": ["owner"],
     "create_thread": ["owner"]
 }

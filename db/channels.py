@@ -390,6 +390,7 @@ def convert_messages_to_user_format(messages):
             msg_copy["reactions"] = converted_reactions
 
         msg_copy.setdefault("pinned", False)
+        msg_copy.setdefault("type", "message")
 
         converted.append(msg_copy)
 

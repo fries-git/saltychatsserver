@@ -352,7 +352,6 @@ class DiscordGateway:
             "user": rotur_username,
             "content": content,
             "timestamp": time.time(),
-            "type": "message",
             "pinned": False,
             "id": str(uuid.uuid4()),
             "source": "discord",

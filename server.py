@@ -359,7 +359,6 @@ class OriginChatsServer:
             "user": "originChats",
             "content": content,
             "timestamp": time.time(),
-            "type": "message",
             "id": message_id,
             "webhook": {
                 "id": webhook.get("id"),

@@ -98,7 +98,6 @@ async def on_user_join(ws, message_data, server_data=None):
             "user": "originChats",
             "content": welcome_content,
             "timestamp": time.time(),
-            "type": "message",
             "id": str(uuid.uuid4())
         }
 

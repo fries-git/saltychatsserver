@@ -355,7 +355,6 @@ def send_mod_message(channel, content, server_data):
         "user": "AutoMod",
         "content": content,
         "timestamp": time.time(),
-        "type": "message",
         "id": str(uuid.uuid4())
     }
     

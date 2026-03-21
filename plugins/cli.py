@@ -434,7 +434,6 @@ def send_message_to_channel(channel, content, server_data):
         "user": "OriginChats",
         "content": content.strip(),
         "timestamp": time.time(),
-        "type": "message",
         "id": str(uuid.uuid4())
     }
     

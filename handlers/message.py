@@ -460,7 +460,6 @@ async def handle(ws, message, server_data=None):
                     "user": user_id,
                     "content": content,
                     "timestamp": time.time(),
-                    "type": "message",
                     "id": str(uuid.uuid4())
                 }
 

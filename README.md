@@ -1,5 +1,5 @@
 # OriginChats Server
-## fries' fork again because he forgot to git pull like a moron
+## fries' fork again because he forgot to pull the repo into vscode like a moron
 
 A WebSocket-based real-time chat server with voice channels, slash commands, role-based permissions, and plugin support.
 

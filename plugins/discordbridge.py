@@ -7,10 +7,15 @@
 
 import os
 from pathlib import Path
+import uuid
 from dotenv import load_dotenv
+from db import channels
 import asyncio
 from logger import Logger
-from db.webhooks import get_all_webhooks, delete_webhook, create_webhook, webhook_exists_for_channel
+import time
+
+sharedchannels= []
+originwebhooks = []
 
 env_path = Path(__file__).parent / 'discordBridge.env'
 load_dotenv(dotenv_path=env_path)
@@ -46,13 +51,40 @@ async def on_ready():
     global discordchannels
     discordchannels = []
     print(f'{bot.user} has connected to Discord!')
-    print('Channels the bot can see:')
     for guild in bot.guilds:
         print(f"\nGuild: {guild.name} (ID: {guild.id})")
         for channel in guild.channels:
-            Logger.info(f"- {channel.name} (Type: {channel.type}, ID: {channel.id})")
-            discordchannels.append(channel.name)
+            # Logger.info(f"- {channel.name} (Type: {channel.type}, ID: {channel.id})")
+            if channel.type == discord.ChannelType.text:
+                discordchannels.append(channel.name)
     Logger.info(f"Total channels found: {len(discordchannels)}")
+    global sharedchannels
+    global discwebhooks
+    global originwebhooks
+    global channelnames
+    sharedchannels = list(set(originchannels) & set(discordchannels))
+    print(f"Discord Channels: {discordchannels}")
+    print(f"Origin Channels: {originchannels}")
+    print(f"Shared Channels: {sharedchannels}")
+
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
+
+    if not message.guild.id == int(DISCORD_GUILD_ID):
+        return
+
+    if message.channel.name in sharedchannels:
+        Logger.info(f"Message received in shared channel '{message.channel.name}': {message.content}")
+        sendmessage = {
+        "user": "originChats",
+        "content": message.author.name + ": " + message.content,
+        "timestamp": time.time(),
+        "id": str(uuid.uuid4())
+    }
+        channels.save_channel_message(message.channel.name, sendmessage)
+        
 
 async def start_bot():
     await bot.start(DISCORD_BOT_TOKEN)

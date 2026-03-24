@@ -76,6 +76,7 @@ async def on_message(message):
         return
 
     if message.channel.name in sharedchannels:
+        channels.save_channel_message(message.channel.name, sendmessage)
         Logger.info(f"Message received in shared channel '{message.channel.name}': {message.content}")
         sendmessage = {
         "user": "originChats",
@@ -83,7 +84,7 @@ async def on_message(message):
         "timestamp": time.time(),
         "id": str(uuid.uuid4())
     }
-        channels.save_channel_message(message.channel.name, sendmessage)
+        
         
 
 async def start_bot():

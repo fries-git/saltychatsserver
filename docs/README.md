@@ -1,243 +1,210 @@
 # OriginChats Documentation
 
-Welcome to the OriginChats server documentation. OriginChats is a WebSocket-based real-time chat server with voice channels, slash commands, plugins, and role-based permissions.
+Welcome to the OriginChats documentation.
 
-> **Client List:** See [clients.md](../clients.md) for a list of official and community clients.
+## Quick Links
 
----
-
-## Table of Contents
-
-- [Getting Started](#getting-started)
-  - [Quick Start](#quick-start)
-  - [Setup](#setup)
-  - [Configuration](#configuration)
-- [API Reference](#api-reference)
-- [Commands](#commands)
-- [Data Structures](#data-structures)
-- [Client Development](#client-development)
-
----
-
-## Getting Started
-
-### Quick Start
-
-OriginChats is a real-time WebSocket chat server built in Python. It supports text and voice channels, role-based permissions, slash commands, and plugin extensibility.
-
-### Setup
-
-1. **Requirements:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **Configuration:**
-   - Run `python setup.py` to generate `config.json`, or edit it manually
-   - Configure Rotur authentication service
-
-3. **Start the Server:**
-   ```bash
-   python init.py
-   ```
-
-### Configuration
-
-Key configuration options in `config.json`:
-
-```json
-{
-  "websocket": {
-    "host": "127.0.0.1",
-    "port": 5613
-  },
-  "rate_limiting": {
-    "enabled": true,
-    "messages_per_minute": 30
-  },
-  "limits": {
-    "post_content": 2000,
-    "search_results": 30
-  },
-  "uploads": {
-    "emoji_allowed_file_types": ["gif", "jpg", "jpeg", "png"]
-  }
-}
-```
-
-For full configuration details, see [Configuration](config.md).
-
-To add a new config value:
-
-1. Add the default in `config_builder.py`.
-2. If it should be configurable during setup, prompt for it in `setup.py` and add it to the overrides passed into `build_config(...)`.
-3. Read it with `get_config_value(...)` from `config_store.py`, or use the local handler helper when `server_data["config"]` is already available.
-
----
-
-## API Reference
-
-- [Protocol Documentation](protocol.md) - WebSocket protocol details, handshake, heartbeat
-- [Authentication](auth.md) - User authentication flow with Rotur service
-- [Error Handling](errors.md) - Common error responses and their meanings
+| Topic | Description |
+|-------|-------------|
+| [Overview](overview.md) | Core concepts explained simply |
+| [Getting Started](getting-started.md) | Connect and use the API |
+| [Client Development](clients.md) | Build your own client |
+| [Plugin Development](plugins.md) | Create server plugins |
+| [Production Setup](production.md) | Deploy your server |
+| [Reference](reference.md) | Data structures and config |
+| [Config](config.md) | Server configuration options |
+| [Errors](errors.md) | Common error messages |
 
 ---
 
 ## Commands
 
+All commands documented individually in `docs/commands/`.
+
 ### Text Messaging
 
-| Command | Description | Documentation |
-|---------|-------------|---------------|
-| `message_new` | Send a new message | [View](commands/message_new.md) |
-| `message_edit` | Edit an existing message | [View](commands/message_edit.md) |
-| `message_delete` | Delete a message | [View](commands/message_delete.md) |
-| `typing` | Send typing indicator | [View](commands/typing.md) |
-| `messages_get` | Get channel messages | [View](commands/messages_get.md) |
-| `message_get` | Get a specific message | [View](commands/message_get.md) |
-| `message_replies` | Get replies to a message | [View](commands/message_replies.md) |
-| `messages_search` | Search messages in a channel | [View](commands/messages_search.md) |
-| `messages_pinned` | Get pinned messages | [View](commands/messages_pinned.md) |
-| `message_react_add` | Add reaction to message | [View](commands/message_react_add.md) |
-| `message_react_remove` | Remove reaction from message | [View](commands/message_react_remove.md) |
-| `message_pin` / `message_unpin` | Pin/unpin a message | [View](commands/message_pin.md) |
+| Command | Description |
+|---------|-------------|
+| [`message_new`](commands/message_new.md) | Send a message |
+| [`message_edit`](commands/message_edit.md) | Edit your message |
+| [`message_delete`](commands/message_delete.md) | Delete a message |
+| [`messages_get`](commands/messages_get.md) | Get channel messages |
+| [`message_get`](commands/message_get.md) | Get a specific message |
+| [`messages_search`](commands/messages_search.md) | Search messages |
+| [`messages_pinned`](commands/messages_pinned.md) | Get pinned messages |
+| [`message_pin`](commands/message_pin.md) | Pin a message |
+| [`message_unpin`](commands/message_unpin.md) | Unpin a message |
+| [`message_react_add`](commands/message_react_add.md) | Add reaction |
+| [`message_react_remove`](commands/message_react_remove.md) | Remove reaction |
+| [`message_replies`](commands/message_replies.md) | Get message replies |
+| [`typing`](commands/typing.md) | Send typing indicator |
+
+### Threads (Forum Channels)
+
+| Command | Description |
+|---------|-------------|
+| [`thread_create`](commands/thread_create.md) | Create a thread |
+| [`thread_get`](commands/thread_get.md) | Get thread details |
+| [`thread_messages`](commands/thread_messages.md) | Get thread messages |
+| [`thread_update`](commands/thread_update.md) | Update a thread |
+| [`thread_delete`](commands/thread_delete.md) | Delete a thread |
+| [`thread_join`](commands/thread_join.md) | Join a thread |
+| [`thread_leave`](commands/thread_leave.md) | Leave a thread |
 
 ### Voice Channels
 
-| Command | Description | Documentation |
-|---------|-------------|---------------|
-| `voice_join` | Join a voice channel | [View](commands/voice_join.md) |
-| `voice_leave` | Leave current voice channel | [View](commands/voice_leave.md) |
-| `voice_mute` / `voice_unmute` | Mute/unmute microphone | [View](commands/voice_mute.md) |
-| `voice_state` | Get voice channel participants | [View](commands/voice_state.md) |
+| Command | Description |
+|---------|-------------|
+| [`voice_join`](commands/voice_join.md) | Join voice channel |
+| [`voice_leave`](commands/voice_leave.md) | Leave voice channel |
+| [`voice_mute`](commands/voice_mute.md) | Mute/unmute yourself |
+| [`voice_state`](commands/voice_state.md) | Get voice participants |
 
-### User Management
+### Users
 
-| Command | Description | Documentation |
-|---------|-------------|---------------|
-| `users_list` | List all users | [View](commands/users_list.md) |
-| `users_online` | List online users | [View](commands/users_online.md) |
-| `status_set` | Set user status | [View](commands/status_set.md) |
-| `status_get` | Get user status | [View](commands/status_get.md) |
-| `users_banned_list` | List banned users (owner only) | [View](commands/users_banned_list.md) |
-| `user_ban` | Ban a user (owner only) | [View](commands/user_ban.md) |
-| `user_unban` | Unban a user (owner only) | [View](commands/user_unban.md) |
-| `user_timeout` | Set user timeout (owner only) | [View](commands/user_timeout.md) |
-| `user_leave` | Disconnect a user (owner only) | [View](commands/user_leave.md) |
-| `user_roles_add` | Add roles to a user (owner only) | [View](commands/user_roles_add.md) |
-| `user_roles_remove` | Remove roles from a user (owner only) | [View](commands/user_roles_remove.md) |
-| `user_roles_get` | Get a user's roles (owner only) | [View](commands/user_roles_get.md) |
+| Command | Description |
+|---------|-------------|
+| [`users_list`](commands/users_list.md) | List all users |
+| [`users_online`](commands/users_online.md) | List online users |
+| [`status_set`](commands/status_set.md) | Set your status |
+| [`status_get`](commands/status_get.md) | Get user status |
+| [`pings_get`](commands/pings_get.md) | Get your pings |
 
-### Role Management
+### Channels
 
-| Command | Description | Documentation |
-|---------|-------------|---------------|
-| `role_create` | Create a new role (owner only) | [View](commands/role_create.md) |
-| `role_update` | Update a role (owner only) | [View](commands/role_update.md) |
-| `role_delete` | Delete a role (owner only) | [View](commands/role_delete.md) |
-| `roles_list` | List all roles | [View](commands/roles_list.md) |
+| Command | Description |
+|---------|-------------|
+| [`channels_get`](commands/channels_get.md) | Get available channels |
+| [`channel_create`](commands/channel_create.md) | Create channel (owner) |
+| [`channel_update`](commands/channel_update.md) | Update channel (owner) |
+| [`channel_move`](commands/channel_move.md) | Move channel (owner) |
+| [`channel_delete`](commands/channel_delete.md) | Delete channel (owner) |
 
-### Channel Management
+### Roles & Permissions
 
-| Command | Description | Documentation |
-|---------|-------------|---------------|
-| `channels_get` | Get available channels | [View](commands/channels_get.md) |
-| `channel_create` | Create a new channel (owner only) | [View](commands/channel_create.md) |
-| `channel_update` | Update a channel (owner only) | [View](commands/channel_update.md) |
-| `channel_move` | Move a channel to new position (owner only) | [View](commands/channel_move.md) |
-| `channel_delete` | Delete a channel (owner only) | [View](commands/channel_delete.md) |
+| Command | Description |
+|---------|-------------|
+| [`roles_list`](commands/roles_list.md) | List all roles |
+| [`role_create`](commands/role_create.md) | Create role (owner) |
+| [`role_update`](commands/role_update.md) | Update role (owner) |
+| [`role_delete`](commands/role_delete.md) | Delete role (owner) |
+| [`user_roles_set`](commands/user_roles_set.md) | Set user roles (owner) |
+| [`user_roles_get`](commands/user_roles_get.md) | Get user's roles |
 
-### Server Management
+### User Management (Owner)
 
-| Command | Description | Documentation |
-|---------|-------------|---------------|
-| `ping` | Ping the server | [View](commands/ping.md) |
-| `plugins_list` | List loaded plugins | [View](commands/plugins_list.md) |
-| `plugins_reload` | Reload plugins | [View](commands/plugins_reload.md) |
-| `rate_limit_status` | Check rate limit status | [View](commands/rate_limit_status.md) |
-| `rate_limit_reset` | Reset rate limit (owner only) | [View](commands/rate_limit_reset.md) |
+| Command | Description |
+|---------|-------------|
+| [`user_ban`](commands/user_ban.md) | Ban a user |
+| [`user_unban`](commands/user_unban.md) | Unban a user |
+| [`users_banned_list`](commands/users_banned_list.md) | List banned users |
+| [`user_timeout`](commands/user_timeout.md) | Timeout a user |
+| [`user_leave`](commands/user_leave.md) | Disconnect a user |
+| [`user_update`](commands/user_update.md) | Update user data |
+| [`user_delete`](commands/user_delete.md) | Delete user |
+
+### Nicknames
+
+| Command | Description |
+|---------|-------------|
+| [`nickname_update`](commands/nickname_update.md) | Set nickname |
+| [`nickname_remove`](commands/nickname_remove.md) | Remove nickname |
+
+### Emojis
+
+| Command | Description |
+|---------|-------------|
+| [`emoji_add`](commands/emoji_add.md) | Add custom emoji |
+| [`emoji_get_all`](commands/emoji_get_all.md) | Get all emojis |
+| [`emoji_get_id`](commands/emoji_get_id.md) | Get emoji by ID |
+| [`emoji_get_filename`](commands/emoji_get_filename.md) | Get emoji by filename |
+| [`emoji_update`](commands/emoji_update.md) | Update emoji |
+| [`emoji_delete`](commands/emoji_delete.md) | Delete emoji |
 
 ### Slash Commands
 
-| Command | Description | Documentation |
-|---------|-------------|---------------|
-| `slash_register` | Register a new slash command (owner only) | [View](commands/slash_register.md) |
-| `slash_list` | List all registered slash commands | [View](commands/slash_list.md) |
-| `slash_call` | Execute a slash command | [View](commands/slash_call.md) |
+| Command | Description |
+|---------|-------------|
+| [`slash_register`](commands/slash_register.md) | Register a slash command |
+| [`slash_list`](commands/slash_list.md) | List slash commands |
+| [`slash_call`](commands/slash_call.md) | Execute a slash command |
+| [`slash_response`](commands/slash_response.md) | Respond to slash command |
+
+### Webhooks
+
+| Command | Description |
+|---------|-------------|
+| [`webhook_create`](commands/webhook_create.md) | Create webhook |
+| [`webhook_list`](commands/webhook_list.md) | List webhooks |
+| [`webhook_get`](commands/webhook_get.md) | Get webhook |
+| [`webhook_update`](commands/webhook_update.md) | Update webhook |
+| [`webhook_delete`](commands/webhook_delete.md) | Delete webhook |
+| [`webhook_regenerate`](commands/webhook_regenerate.md) | Regenerate webhook token |
 
 ### Push Notifications
 
-| Command | Description | Documentation |
-|---------|-------------|---------------|
-| `push_get_vapid` | Request the server's VAPID public key | [View](commands/push_get_vapid.md) |
-| `push_subscribe` | Register a Web Push subscription | [View](commands/push_subscribe.md) |
-| `push_unsubscribe` | Remove a Web Push subscription | [View](commands/push_unsubscribe.md) |
+| Command | Description |
+|---------|-------------|
+| [`push_get_vapid`](commands/push_get_vapid.md) | Get VAPID public key |
+| [`push_subscribe`](commands/push_subscribe.md) | Subscribe to push |
+| [`push_unsubscribe`](commands/push_unsubscribe.md) | Unsubscribe from push |
 
-For a full overview of the feature including server setup, payload format, and client integration, see the [Web Push Notifications guide](push_notifications.md).
+### Server Management
+
+| Command | Description |
+|---------|-------------|
+| [`ping`](commands/ping.md) | Ping the server |
+| [`plugins_list`](commands/plugins_list.md) | List plugins |
+| [`plugins_reload`](commands/plugins_reload.md) | Reload plugins |
+| [`rate_limit_status`](commands/rate_limit_status.md) | Check rate limit |
+| [`rate_limit_reset`](commands/rate_limit_reset.md) | Reset rate limit (owner) |
+| [`auth`](commands/auth.md) | Authenticate |
+| [`events`](commands/events.md) | Get server events |
+
+### Embeds
+
+| Command | Description |
+|---------|-------------|
+| [`embeds_list`](commands/embeds_list.md) | List embeds |
 
 ---
 
 ## Data Structures
 
-- [User Object](data/user.md) - User data structure
-- [Channel Object](data/channels.md) - Channel configuration, permissions, and voice state
-- [Message Object](data/messages.md) - Message structure with replies and reactions
-- [Emoji Object](data/emojis.md) - Custom emoji metadata and collection format
-- [Role Object](data/roles.md) - Role definitions and colors
-- [Config Schema](data/config.md) - Server configuration options
-- [Permissions System](data/permissions.md) - How role-based permissions work
+| Structure | Description |
+|-----------|-------------|
+| [User](data/user.md) | User object format |
+| [Channel](data/channels.md) | Channel configuration |
+| [Message](data/messages.md) | Message structure |
+| [Role](data/roles.md) | Role definition |
+| [Emoji](data/emojis.md) | Custom emoji |
+| [Permissions](data/permissions.md) | Permission system |
 
 ---
 
-## Client Development
+## Slash Commands (Built-in)
 
-For developers building clients:
+Users can use these slash commands:
 
-1. **Connection Flow:**
-   - Connect to WebSocket server
-   - Receive handshake packet
-   - Authenticate using Rotur validator
-   - Start sending/receiving commands
-
-2. **Voice Channels:**
-   - WebRTC peer connection setup
-   - Join/leave voice channels
-   - Mute/unmute functionality
-
-3. **Commands Overview:**
-   - All commands use JSON format with `cmd` field
-   - Global broadcasts use `global: true` flag
-   - Errors return `{ "cmd": "error", "val": "message" }`
+| Command | Description | Docs |
+|---------|-------------|------|
+| `/help` | Show available commands | [slash_help](slash/slash_help.md) |
+| `/nick <name>` | Change nickname | [slash_nick](slash/slash_nick.md) |
+| `/ban <user>` | Ban a user | [slash_ban](slash/slash_ban.md) |
+| `/unban <user>` | Unban a user | [slash_unban](slash/slash_unban.md) |
+| `/mute <user>` | Mute a user | [slash_mute](slash/slash_mute.md) |
+| `/unmute <user>` | Unmute a user | [slash_unmute](slash/slash_unmute.md) |
+| `/role <user> <role>` | Assign a role | [slash_role](slash/slash_role.md) |
+| `/channel <name>` | Create channel | [slash_channel](slash/slash_channel.md) |
 
 ---
 
-## Rate Limiting
+## Other Resources
 
-OriginChats includes built-in rate limiting:
-
-- **Per-minute limit:** Maximum messages per user per minute (configurable)
-- **Burst protection:** Prevents spam in short time windows
-- **Cooldown:** Temporary restriction after burst limit exceeded
-
-Response format:
-```json
-{
-  "cmd": "rate_limit",
-  "length": <milliseconds>
-}
-```
-
-See [README.md](../README.md) for server architecture and rate limiting details.
+- [Push Notifications Guide](push_notifications.md) - Web Push setup
+- [Welcome Plugin](plugins/welcome.md) - Example plugin
+- [User Join/Leave Events](events/user_join_leave.md) - Event handling
 
 ---
 
-## Support
-
-For issues, questions, or contributions:
-- **Source Code:** [Repository](https://github.com/...)
-- **Issue Tracker:** Open an issue on GitHub
-- **Protocol:** See [protocol.md](protocol.md)
-
----
-
-**Last Updated:** 2026-03-09
+**Last Updated:** 2026-03-25

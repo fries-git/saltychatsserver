@@ -1,155 +1,95 @@
-# OriginChats Server
+# OriginChats
 
-A WebSocket-based real-time chat server with voice channels, slash commands, role-based permissions, and plugin support.
+A real-time chat server with text, voice, and forum channels.
 
 ## Features
 
-- **Text Messaging** - Real-time messaging with replies, reactions, and search
-- **Voice Channels** - WebRTC peer-to-peer audio
+- **Text Channels** - Send messages, reply, react, pin
+- **Voice Channels** - Peer-to-peer audio calls
+- **Forum Channels** - Organized threads for discussions
 - **User Management** - Roles, permissions, bans, timeouts
-- **Rate Limiting** - Built-in spam protection
-- **Plugins** - Extensible plugin system
-- **Slash Commands** - Custom command handlers
+- **Plugins** - Extend with custom features
+- **Slash Commands** - Custom commands for users
 
 ## Quick Start
 
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+1. **Install:**
+```bash
+pip install -r requirements.txt
+```
 
 2. **Configure:**
-   - Run `python setup.py` to generate `config.json`, or edit it manually
-   - Set up Rotur authentication service
+```bash
+python setup.py
+```
 
 3. **Run:**
-   ```bash
-   python init.py
-   ```
-
-## Project Structure
-
+```bash
+python init.py
 ```
-originChats/
-├── init.py                 # Entry point
-├── server.py              # WebSocket server
-├── config.json            # Server configuration
-├── watchers.py            # File system watchers
-├── db/                    # Database modules
-│   ├── channels.py        # Channel management
-│   ├── users.py           # User management
-│   ├── roles.py           # Role management
-│   └── *.json             # Data files
-├── handlers/              # Request handlers
-│   ├── auth.py            # Authentication
-│   ├── message.py         # Command router
-│   ├── websocket_utils.py # WebSocket utilities
-│   └── rate_limiter.py    # Rate limiting
-├── plugins/               # Plugin examples
-└── docs/                  # Documentation
-    ├── client-development/
-    ├── commands/
-    └── data/
-```
+
+Server runs at `ws://localhost:5613` by default.
 
 ## Documentation
 
-- **[API Documentation](docs/)** - Complete API reference for client developers
-  - [Getting Started](docs/README.md#getting-started)
-  - [All Commands](docs/README.md#commands)
-  - [Data Structures](docs/README.md#data-structures)
-  - [Client Development Guide](docs/client-development/getting-started.md)
-  - [Voice Channels Implementation](docs/client-development/voice.md)
+- **[Overview](docs/overview.md)** - Core concepts and features
+- **[Getting Started](docs/getting-started.md)** - How to connect and use the API
+- **[Client Development](docs/clients.md)** - Build your own client
+- **[Plugin Development](docs/plugins.md)** - Create server plugins
+- **[Production Setup](docs/production.md)** - Deploy securely
+- **[Command Reference](docs/commands/)** - All available commands
+- **[Clients](clients.md)** - Existing clients you can use
 
 ## Configuration
 
-Key settings in `config.json`:
+Main settings in `config.json`:
 
 ```json
 {
-  "websocket": {
-    "host": "127.0.0.1",
-    "port": 5613
-  },
-  "rate_limiting": {
-    "enabled": true,
-    "messages_per_minute": 30,
-    "burst_limit": 5,
-    "cooldown_seconds": 60
-  },
-  "limits": {
-    "post_content": 2000,
-    "search_results": 30
-  },
-  "uploads": {
-    "emoji_allowed_file_types": ["gif", "jpg", "jpeg", "png"]
-  }
+  "websocket": { "host": "127.0.0.1", "port": 5613 },
+  "rate_limiting": { "enabled": true, "messages_per_minute": 30 },
+  "limits": { "post_content": 2000 }
 }
 ```
 
-See [Config Schema](docs/config.md) for full configuration options.
+See [Configuration Docs](docs/config.md) for all options.
 
 ## Rate Limiting
 
-OriginChats includes built-in rate limiting to prevent spam:
+Built-in spam protection limits messages per user. When rate limited, clients receive:
 
-- **Per-minute limit:** Maximum messages per user per minute (configurable)
-- **Burst protection:** Prevents spam in short time windows
-- **Cooldown:** Temporary restriction after burst limit exceeded
-
-Rate limited users receive:
 ```json
-{
-  "cmd": "rate_limit",
-  "length": <milliseconds>
-}
+{ "cmd": "rate_limit", "length": 5000 }
 ```
+
+Wait `length` milliseconds before sending more messages.
 
 ## Channel Types
 
-### Text Channels
-- Send/receive messages
-- Edit/delete own messages
-- Add reactions
-- Reply to messages
-- Pin/unpin messages
-- Search messages
-
-### Voice Channels
-- WebRTC peer-to-peer audio
-- Join/leave freely
-- Mute/unmute
-- View participants without joining
+| Type | Description |
+|------|-------------|
+| **Text** | Real-time text messaging |
+| **Voice** | Audio calls via WebRTC |
+| **Forum** | Organized threads for topics |
 
 ## Permissions
 
-Role-based permission system for:
-
+Role-based permissions control what users can do:
 - View channels
-- Send messages
-- Edit own messages
-- Delete messages (own and others)
+- Send/edit/delete messages
+- Manage users (ban, timeout)
 - Pin messages
-- Add reactions
-- Administrative actions (ban, timeout, etc.)
+- Use slash commands
 
-See [Permissions System](docs/data/permissions.md) for details.
+See [Permissions](docs/data/permissions.md) for details.
 
 ## Authentication
 
-OriginChats integrates with the Rotur authentication service:
-
-1. Server sends handshake with `validator_key`
-2. Client obtains validator from Rotur
-3. Client sends validator to server
-4. Server validates via Rotur API
-5. User is authenticated
-
-See [Authentication Guide](docs/auth.md) for full flow.
+Uses Rotur authentication service. See [Getting Started](docs/getting-started.md) for the full flow.
 
 ## Clients
 
-Check out the [client list](clients.md) for official and community clients:
+See [clients.md](clients.md) for available clients.
 
 ## Development
 
@@ -209,21 +149,5 @@ See [Error Handling](docs/errors.md) for all possible errors.
 
 ## Contributing
 
-Contributions are welcome! Areas of contribution:
-
-- Bug fixes
-- New commands
-- Plugin examples
-- Documentation improvements
-- Client implementations
-
-## License
-
-See LICENSE file for details.
-
-## Support
-
-- 📖 [Documentation](docs/)
-- 🐛 [Issue Tracker](https://github.com/...)
-- 💬 [Discord](https://discord.gg/...)
+Contributions welcome! See the [documentation](docs/) for details.
 

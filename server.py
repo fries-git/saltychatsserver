@@ -7,7 +7,7 @@ from handlers.auth import handle_authentication
 from handlers import message as message_handler
 from handlers.rate_limiter import RateLimiter
 from handlers import github_webhook
-from db import serverEmojis, push as push_db, webhooks as webhooks_db, channels, users, roles
+from db import serverEmojis, push as push_db, webhooks as webhooks_db, channels, users, roles, attachments as attachments_db
 import watchers
 from plugin_manager import PluginManager
 from logger import Logger
@@ -57,6 +57,13 @@ class OriginChatsServer:
         removed = push_db.cleanup_stale_subscriptions()
         if removed > 0:
             Logger.info(f"Cleaned up {removed} stale push subscriptions (inactive > 6 months)")
+
+        # Cleanup expired attachments on startup
+        attachment_config = self.config.get("attachments", {})
+        if attachment_config.get("enabled", True):
+            expired_count = attachments_db.cleanup_expired_attachments()
+            if expired_count > 0:
+                Logger.info(f"Cleaned up {expired_count} expired attachments")
 
         Logger.info(f"OriginChats WebSocket Server v{self.version} initialized")
         if self.rate_limiter:
@@ -260,6 +267,51 @@ class OriginChatsServer:
             **self._cors_headers()
         }))
 
+    async def _route_attachment(self, request):
+        attachment_id = request.match_info.get("attachment_id", "").strip()
+
+        if not attachment_id:
+            return self._apply_cors(web.Response(
+                status=400,
+                content_type="application/json",
+                text=json.dumps({"error": "Attachment ID required"})
+            ))
+
+        attachment_config = self.config.get("attachments", {})
+        if not attachment_config.get("enabled", True):
+            return self._apply_cors(web.Response(
+                status=503,
+                content_type="application/json",
+                text=json.dumps({"error": "Attachments are disabled"})
+            ))
+
+        attachment = attachments_db.get_attachment(attachment_id)
+        if not attachment:
+            return self._apply_cors(web.Response(
+                status=404,
+                content_type="application/json",
+                text=json.dumps({"error": "Attachment not found or expired"})
+            ))
+
+        file_path = attachments_db.get_attachment_file_path(attachment_id)
+        if not file_path or not os.path.isfile(file_path):
+            return self._apply_cors(web.Response(
+                status=404,
+                content_type="application/json",
+                text=json.dumps({"error": "Attachment file not found"})
+            ))
+
+        mime_type = attachment.get("mime_type", "application/octet-stream")
+
+        return self._apply_cors(web.FileResponse(
+            file_path,
+            headers={
+                "Content-Type": mime_type,
+                "Cache-Control": "public, max-age=3600",
+                **self._cors_headers()
+            }
+        ))
+
     async def _route_webhook(self, request):
         token = request.rel_url.query.get("token")
         if not token:
@@ -405,11 +457,21 @@ class OriginChatsServer:
             connection_validator_key = "originChats-" + secrets.token_urlsafe(24)
             self._ws_data[ws_id]["validator_key"] = connection_validator_key
 
+            attachment_config = self.config.get("attachments", {})
+            attachments_info = {
+                "enabled": attachment_config.get("enabled", True),
+                "max_size": attachment_config.get("max_size", 104857600),
+                "allowed_types": attachment_config.get("allowed_types", ["image/*", "video/*", "audio/*", "application/pdf"]),
+                "max_attachments_per_user": attachment_config.get("max_attachments_per_user", -1),
+                "permanent_tiers": attachment_config.get("permanent_tiers", ["pro", "max"]),
+            }
+
             await send_to_client(ws, {
                 "cmd": "handshake",
                 "val": {
                     "server": self.config["server"],
                     "limits": self.config["limits"],
+                    "attachments": attachments_info,
                     "version": "1.1.0",
                     "validator_key": connection_validator_key,
                     "capabilities": self.capabilities
@@ -578,6 +640,9 @@ class OriginChatsServer:
         }
         self.plugin_manager.trigger_event("server_start", None, {}, server_data)
 
+        # Start the daily cleanup task
+        self._cleanup_task = asyncio.create_task(self._daily_cleanup_task())
+
         app = web.Application()
 
         # OPTIONS preflight for all routes
@@ -591,6 +656,7 @@ class OriginChatsServer:
         app.router.add_get("/info", self._route_info)
         app.router.add_get("/emojis/{filename}", self._route_emoji)
         app.router.add_get("/server-assets/{name}", self._route_server_asset)
+        app.router.add_get("/attachments/{attachment_id}", self._route_attachment)
 
         # Webhook (POST)
         app.router.add_post("/webhooks", self._route_webhook)
@@ -609,8 +675,22 @@ class OriginChatsServer:
         try:
             await asyncio.Future()  # run forever
         finally:
+            self._cleanup_task.cancel()
             if self.file_observer:
                 self.file_observer.stop()
                 self.file_observer.join()
-                Logger.info("File watcher stopped")
+            Logger.info("File watcher stopped")
             await runner.cleanup()
+
+    async def _daily_cleanup_task(self):
+        """Run attachment cleanup once every 24 hours."""
+        while True:
+            try:
+                await asyncio.sleep(24 * 60 * 60)  # 24 hours
+                result = attachments_db.run_daily_cleanup()
+                if result["total"] > 0:
+                    Logger.info(f"Daily cleanup: removed {result['total']} attachments")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                Logger.error(f"Error in daily cleanup task: {e}")

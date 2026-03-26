@@ -11,7 +11,7 @@ import uuid
 import asyncio
 import time
 from pathlib import Path
-import gc   # ← only new import needed for the working connected_clients lookup
+import gc
 
 from dotenv import load_dotenv
 

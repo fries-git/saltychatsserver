@@ -169,6 +169,8 @@ def is_type_allowed(mime_type: str) -> bool:
     if not allowed:
         return True
     for pattern in allowed:
+        if pattern == "*":
+            return True
         if pattern == mime_type:
             return True
         if pattern.endswith("/*"):

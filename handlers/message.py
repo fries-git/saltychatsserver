@@ -2,7 +2,7 @@ from db import channels, users, roles, serverEmojis, threads
 import time, uuid, sys, os, asyncio, json, re
 from handlers.messages.webhook import handle_webhook_create, handle_webhook_get, handle_webhook_list, handle_webhook_delete, handle_webhook_update, handle_webhook_regenerate
 from handlers.messages.emoji import handle_emoji_add, handle_emoji_delete, handle_emoji_get_all, handle_emoji_update, handle_emoji_get_filename, handle_emoji_get_id
-from handlers.messages.attachment import handle_attachment_upload, handle_attachment_delete, handle_attachment_get
+from handlers.messages.attachment import handle_attachment_delete, handle_attachment_get
 from handlers.messages.role import handle_role_create, handle_role_update, handle_role_delete, handle_roles_list, handle_role_permissions_set, handle_role_permissions_get, handle_role_set
 from handlers.messages.self_role import handle_self_role_add, handle_self_role_remove, handle_self_roles_list
 from handlers.messages.slash import handle_slash_register, handle_slash_list, handle_slash_call, handle_slash_response
@@ -1683,24 +1683,13 @@ async def handle(ws, message, server_data: dict):
                 return handle_emoji_get_filename(ws, message, match_cmd)
             case "emoji_get_id":
                 return handle_emoji_get_id(ws, message, match_cmd)
-            case "attachment_upload":
-                attachment_config = server_data.get("config", {}).get("attachments", {})
-                if not attachment_config.get("enabled", True):
-                    return _error("Attachments are disabled", match_cmd)
-                return handle_attachment_upload(ws, message, server_data, match_cmd)
             case "attachment_delete":
                 return handle_attachment_delete(ws, message, server_data, match_cmd)
             case "attachment_get":
                 return handle_attachment_get(ws, message, server_data, match_cmd)
-            case "slash_register":
-                return handle_slash_register(ws, message, match_cmd, server_data)
-            case "slash_list":
-                return handle_slash_list(ws, message, match_cmd, server_data)
-            case "slash_call":
-                return handle_slash_call(ws, message, match_cmd, server_data)
-            case "slash_response":
-                return handle_slash_response(ws, message, match_cmd, server_data)
             case "push_get_vapid":
+                return await push_handler.handle_push_get_vapid(ws)
+            case "push_subscribe":
                 return await push_handler.handle_push_get_vapid(ws)
             case "push_subscribe":
                 return await push_handler.handle_push_subscribe(ws, message)

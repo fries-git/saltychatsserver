@@ -312,6 +312,168 @@ class OriginChatsServer:
             }
         ))
 
+    async def _route_attachment_upload(self, request):
+        content_type_header = request.headers.get("Content-Type", "")
+        if not content_type_header.startswith("application/json"):
+            return self._apply_cors(web.Response(
+                status=415,
+                content_type="application/json",
+                text=json.dumps({"error": "Content-Type must be application/json"})
+            ))
+
+        attachment_config = self.config.get("attachments", {})
+        if not attachment_config.get("enabled", True):
+            return self._apply_cors(web.Response(
+                status=503,
+                content_type="application/json",
+                text=json.dumps({"error": "Attachments are disabled"})
+            ))
+
+        try:
+            body = await request.read()
+        except Exception:
+            return self._apply_cors(web.Response(
+                status=400,
+                content_type="application/json",
+                text=json.dumps({"error": "Failed to read request body"})
+            ))
+
+        max_size = attachment_config.get("max_size", 104857600)
+        if len(body) > max_size:
+            return self._apply_cors(web.Response(
+                status=413,
+                content_type="application/json",
+                text=json.dumps({"error": f"Request body too large (max {max_size} bytes)"})
+            ))
+
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return self._apply_cors(web.Response(
+                status=400,
+                content_type="application/json",
+                text=json.dumps({"error": "Invalid JSON body"})
+            ))
+
+        validator_key = data.get("validator_key")
+        validator = data.get("validator")
+
+        if not validator_key or not validator:
+            return self._apply_cors(web.Response(
+                status=401,
+                content_type="application/json",
+                text=json.dumps({"error": "validator_key and validator are required for authentication"})
+            ))
+
+        import requests
+        from db import users as users_db, channels as channels_db, attachments as attachments_db
+        from handlers.rotur_api import has_permanent_upload
+
+        try:
+            auth_response = requests.get(
+                "https://api.rotur.dev/validate",
+                params={"key": validator_key, "v": validator},
+                timeout=10
+            )
+        except requests.RequestException:
+            return self._apply_cors(web.Response(
+                status=502,
+                content_type="application/json",
+                text=json.dumps({"error": "Failed to validate credentials"})
+            ))
+
+        if auth_response.status_code != 200 or auth_response.json().get("valid") != True:
+            return self._apply_cors(web.Response(
+                status=401,
+                content_type="application/json",
+                text=json.dumps({"error": "Invalid credentials"})
+            ))
+
+        auth_data = auth_response.json()
+        user_id = auth_data.get("id", "")
+        username = auth_data.get("username", "")
+
+        if not user_id:
+            return self._apply_cors(web.Response(
+                status=401,
+                content_type="application/json",
+                text=json.dumps({"error": "User ID not found in authentication response"})
+            ))
+
+        user_data = users_db.get_user(user_id)
+        if not user_data:
+            return self._apply_cors(web.Response(
+                status=401,
+                content_type="application/json",
+                text=json.dumps({"error": "User not found"})
+            ))
+
+        user_roles = user_data.get("roles", [])
+
+        file_data = data.get("file")
+        name = data.get("name")
+        mime_type = data.get("mime_type")
+        channel = data.get("channel")
+        expires_in_days = data.get("expires_in_days")
+
+        if not file_data or not name or not mime_type or not channel:
+            return self._apply_cors(web.Response(
+                status=400,
+                content_type="application/json",
+                text=json.dumps({"error": "Missing required fields: file, name, mime_type, channel"})
+            ))
+
+        if not channels_db.channel_exists(channel):
+            return self._apply_cors(web.Response(
+                status=404,
+                content_type="application/json",
+                text=json.dumps({"error": "Channel does not exist"})
+            ))
+
+        if not channels_db.does_user_have_permission(channel, user_roles, "send"):
+            return self._apply_cors(web.Response(
+                status=403,
+                content_type="application/json",
+                text=json.dumps({"error": "You don't have permission to send in this channel"})
+            ))
+
+        is_permanent = has_permanent_upload(username)
+
+        base_url = ""
+        if "server" in self.config and "url" in self.config["server"]:
+            base_url = self.config["server"]["url"].rstrip("/")
+
+        attachment = attachments_db.save_attachment(
+            file_data=file_data,
+            original_name=name,
+            mime_type=mime_type,
+            uploader_id=user_id,
+            uploader_name=username,
+            channel=channel,
+            permanent=is_permanent,
+            custom_expires_in_days=expires_in_days,
+        )
+
+        if not attachment:
+            return self._apply_cors(web.Response(
+                status=500,
+                content_type="application/json",
+                text=json.dumps({"error": "Failed to save attachment"})
+            ))
+
+        attachment_info = attachments_db.get_attachment_info_for_client(attachment, base_url)
+
+        Logger.success(f"Attachment uploaded via HTTP: {attachment['id']} by {username}")
+
+        return self._apply_cors(web.Response(
+            status=201,
+            content_type="application/json",
+            text=json.dumps({
+                "attachment": attachment_info,
+                "permanent": is_permanent
+            })
+        ))
+
     async def _route_webhook(self, request):
         token = request.rel_url.query.get("token")
         if not token:
@@ -643,7 +805,8 @@ class OriginChatsServer:
         # Start the daily cleanup task
         self._cleanup_task = asyncio.create_task(self._daily_cleanup_task())
 
-        app = web.Application()
+        max_upload_size = self.config.get("attachments", {}).get("max_size", 100 * 1024 * 1024)
+        app = web.Application(client_max_size=max_upload_size)
 
         # OPTIONS preflight for all routes
         app.router.add_route("OPTIONS", "/{path_info:.*}", self._route_options)
@@ -657,6 +820,7 @@ class OriginChatsServer:
         app.router.add_get("/emojis/{filename}", self._route_emoji)
         app.router.add_get("/server-assets/{name}", self._route_server_asset)
         app.router.add_get("/attachments/{attachment_id}", self._route_attachment)
+        app.router.add_post("/attachments/upload", self._route_attachment_upload)
 
         # Webhook (POST)
         app.router.add_post("/webhooks", self._route_webhook)

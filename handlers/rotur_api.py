@@ -59,7 +59,7 @@ def get_user_subscription(username: str) -> Optional[str]:
         with _get_cache_lock():
             _subscription_cache[cache_key] = (tier, time.time())
 
-        Logger.debug(f"Rotur subscription for {username}: {tier}")
+        Logger.info(f"Rotur subscription for {username}: {tier}")
         return tier
 
     except requests.RequestException as e:

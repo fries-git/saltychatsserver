@@ -16,3 +16,5 @@ vapid/vapid_config.json
 
 db/threadMessages/*
 !db/threadMessages/.gitkeep
+db/attachments/*
+!db/attachments/.gitkeep

@@ -4,6 +4,7 @@ from handlers.messages.webhook import handle_webhook_create, handle_webhook_get,
 from handlers.messages.emoji import handle_emoji_add, handle_emoji_delete, handle_emoji_get_all, handle_emoji_update, handle_emoji_get_filename, handle_emoji_get_id
 from handlers.messages.attachment import handle_attachment_upload, handle_attachment_delete, handle_attachment_get
 from handlers.messages.role import handle_role_create, handle_role_update, handle_role_delete, handle_roles_list, handle_role_permissions_set, handle_role_permissions_get, handle_role_set
+from handlers.messages.self_role import handle_self_role_add, handle_self_role_remove, handle_self_roles_list
 from handlers.messages.slash import handle_slash_register, handle_slash_list, handle_slash_call, handle_slash_response
 from handlers.messages.channel import handle_channels_get, handle_channel_create, handle_channel_update, handle_channel_move, handle_channel_delete
 from handlers.messages.rate_limit import handle_rate_limit_status, handle_rate_limit_reset
@@ -1512,6 +1513,12 @@ async def handle(ws, message, server_data: dict):
                 return handle_role_permissions_set(ws, message, match_cmd)
             case "role_permissions_get":
                 return handle_role_permissions_get(ws, message, match_cmd)
+            case "self_role_add":
+                return handle_self_role_add(ws, message, match_cmd, server_data)
+            case "self_role_remove":
+                return handle_self_role_remove(ws, message, match_cmd, server_data)
+            case "self_roles_list":
+                return handle_self_roles_list(ws, message, match_cmd)
             case "channel_create":
                 return handle_channel_create(ws, message, match_cmd, server_data)
             case "channel_update":

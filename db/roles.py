@@ -308,10 +308,10 @@ def get_hoisted_roles():
 def is_role_hoisted(role_name):
     """
     Check if a role is hoisted.
-    
+
     Args:
         role_name (str): The name of the role.
-    
+
     Returns:
         bool: True if the role is hoisted, False otherwise.
     """
@@ -319,3 +319,78 @@ def is_role_hoisted(role_name):
     if role_data is None:
         return False
     return role_data.get("hoisted", False)
+
+
+def is_role_self_assignable(role_name):
+    """
+    Check if a role is self-assignable.
+
+    Args:
+        role_name (str): The name of the role.
+
+    Returns:
+        bool: True if the role is self-assignable, False otherwise.
+    """
+    role_data = get_role(role_name)
+    if role_data is None:
+        return False
+    return role_data.get("self_assignable", False)
+
+
+def get_self_assignable_roles():
+    """
+    Get all roles that are self-assignable.
+
+    Returns:
+        list: A list of role names that are self-assignable.
+    """
+    with _lock:
+        roles_dict = _get_roles_cache()
+        self_assignable = []
+        for role_name, role_data in roles_dict.items():
+            if role_data.get("self_assignable", False):
+                self_assignable.append({
+                    "name": role_name,
+                    "description": role_data.get("description", ""),
+                    "color": role_data.get("color")
+                })
+        return self_assignable
+
+
+def set_role_self_assignable(role_name, value):
+    """
+    Set whether a role is self-assignable.
+
+    Args:
+        role_name (str): The name of the role.
+        value (bool): Whether the role should be self-assignable.
+
+    Returns:
+        bool: True if successful, False if role not found.
+    """
+    with _lock:
+        roles_dict = _get_roles_cache()
+        if role_name not in roles_dict:
+            return False
+        new_roles = dict(roles_dict)
+        new_roles[role_name] = dict(new_roles[role_name])
+        new_roles[role_name]["self_assignable"] = value
+        _save_roles(new_roles)
+        return True
+
+
+PROTECTED_ROLES = ["owner", "admin", "moderator"]
+
+
+def can_be_self_assignable(role_name):
+    """
+    Check if a role can be made self-assignable.
+    Protected roles like owner, admin cannot be made self-assignable.
+
+    Args:
+        role_name (str): The name of the role.
+
+    Returns:
+        bool: True if the role can be made self-assignable.
+    """
+    return role_name not in PROTECTED_ROLES

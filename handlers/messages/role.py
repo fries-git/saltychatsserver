@@ -23,6 +23,10 @@ def handle_role_create(ws, message, match_cmd, server_data):
         role_data["permissions"] = message["permissions"]
     if message.get("hoisted") is not None:
         role_data["hoisted"] = message["hoisted"]
+    if message.get("self_assignable") is not None:
+        if message["self_assignable"] and not roles.can_be_self_assignable(role_name):
+            return _error(f"Role '{role_name}' cannot be made self-assignable", match_cmd)
+        role_data["self_assignable"] = message["self_assignable"]
 
     if roles.role_exists(role_name):
         return _error("Role already exists", match_cmd)
@@ -65,6 +69,10 @@ def handle_role_update(ws, message, match_cmd, server_data):
         role_data["color"] = message["color"]
     if message.get("hoisted") is not None:
         role_data["hoisted"] = message["hoisted"]
+    if message.get("self_assignable") is not None:
+        if message["self_assignable"] and not roles.can_be_self_assignable(role_name):
+            return _error(f"Role '{role_name}' cannot be made self-assignable", match_cmd)
+        role_data["self_assignable"] = message["self_assignable"]
 
     updated = roles.update_role(role_name, role_data)
     if server_data:
@@ -152,7 +160,7 @@ def handle_roles_list(ws, message, match_cmd):
         return error
 
     all_roles = roles.get_all_roles()
-    return {"cmd": "roles_list", "roles": all_roles}
+    return {"cmd": "roles_list", "roles": all_roles, "self_assignable_roles": roles.get_self_assignable_roles()}
 
 
 def handle_role_permissions_set(ws, message, match_cmd):

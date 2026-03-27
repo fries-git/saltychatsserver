@@ -354,6 +354,26 @@ def get_validator(user_id):
     return user.get("validator")
 
 
+def get_user_id_by_validator(validator_token):
+    """
+    Get a user's ID by their validator token.
+
+    Args:
+        validator_token (str): The validator token to search for.
+
+    Returns:
+        str: The user ID, or None if not found.
+    """
+    if not validator_token:
+        return None
+    with _lock:
+        users = _get_users_cache()
+        for user_id, user_data in users.items():
+            if user_data.get("validator") == validator_token:
+                return user_id
+    return None
+
+
 def get_usernames_by_role(role_name):
     """
     Get all usernames that have a specific role.

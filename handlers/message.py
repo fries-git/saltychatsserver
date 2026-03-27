@@ -2,7 +2,9 @@ from db import channels, users, roles, serverEmojis, threads
 import time, uuid, sys, os, asyncio, json, re
 from handlers.messages.webhook import handle_webhook_create, handle_webhook_get, handle_webhook_list, handle_webhook_delete, handle_webhook_update, handle_webhook_regenerate
 from handlers.messages.emoji import handle_emoji_add, handle_emoji_delete, handle_emoji_get_all, handle_emoji_update, handle_emoji_get_filename, handle_emoji_get_id
+from handlers.messages.attachment import handle_attachment_delete, handle_attachment_get
 from handlers.messages.role import handle_role_create, handle_role_update, handle_role_delete, handle_roles_list, handle_role_permissions_set, handle_role_permissions_get, handle_role_set
+from handlers.messages.self_role import handle_self_role_add, handle_self_role_remove, handle_self_roles_list
 from handlers.messages.slash import handle_slash_register, handle_slash_list, handle_slash_call, handle_slash_response
 from handlers.messages.channel import handle_channels_get, handle_channel_create, handle_channel_update, handle_channel_move, handle_channel_delete
 from handlers.messages.rate_limit import handle_rate_limit_status, handle_rate_limit_reset
@@ -351,7 +353,7 @@ async def _broadcast_voice_event(connected_clients, voice_channels, channel_name
     )
 
 
-async def handle(ws, message, server_data=None):
+async def handle(ws, message, server_data: dict):
     """
     Handle incoming messages from clients.
     This function should be called when a new message is received.
@@ -379,24 +381,25 @@ async def handle(ws, message, server_data=None):
                 # Handle chat message
                 channel_name = message.get("channel")
                 thread_id = message.get("thread_id")
-                content = message.get("content")
+                content = message.get("content", "")
                 reply_to = message.get("reply_to")
                 embeds = message.get("embeds")
+                attachments = message.get("attachments")
                 user_id = _get_ws_attr(ws, "user_id")
 
-                if (not channel_name and not thread_id) or not content or not user_id:
+                if (not channel_name and not thread_id) or (not content and not attachments) or not user_id:
                     missing_fields = []
                     if not channel_name and not thread_id:
                         missing_fields.append("channel or thread_id")
-                    if not content:
-                        missing_fields.append("content")
+                    if not content and not attachments:
+                        missing_fields.append("content or attachments")
                     if not user_id:
                         missing_fields.append("user_id")
                     return _error(f"Missing fields: {', '.join(missing_fields)}", match_cmd)
 
                 content = content.strip()
-                if not content:
-                    return _error("Message content cannot be empty", match_cmd)
+                if not content and not attachments:
+                    return _error("Message content or attachments cannot be empty", match_cmd)
 
                 if embeds:
                     is_valid, error_msg = validate_embeds(embeds)
@@ -455,6 +458,33 @@ async def handle(ws, message, server_data=None):
                     if not replied_message:
                         return _error("The message you're trying to reply to was not found", match_cmd)
 
+                # Validate attachments if provided
+                validated_attachments = []
+                if attachments:
+                    from db import attachments as attachments_db
+                    attachment_config = server_data.get("config", {}).get("attachments", {})
+                    if not attachment_config.get("enabled", True):
+                        return _error("Attachments are disabled", match_cmd)
+
+                    if not isinstance(attachments, list):
+                        return _error("Attachments must be an array", match_cmd)
+
+                    for att in attachments:
+                        if not isinstance(att, dict):
+                            return _error("Each attachment must be an object", match_cmd)
+                        att_id = att.get("id")
+                        if not att_id:
+                            return _error("Attachment ID is required", match_cmd)
+                        attachment = attachments_db.get_attachment(att_id)
+                        if not attachment:
+                            return _error(f"Attachment {att_id} not found or expired", match_cmd)
+                        if attachment.get("uploader_id") != user_id:
+                            return _error("You can only attach your own uploads", match_cmd)
+                        base_url = ""
+                        if "server" in server_data.get("config", {}) and "url" in server_data["config"]["server"]:
+                            base_url = server_data["config"]["server"]["url"].rstrip("/")
+                        validated_attachments.append(attachments_db.get_attachment_info_for_client(attachment, base_url))
+
                 # Save the message
                 out_msg = {
                     "user": user_id,
@@ -466,6 +496,9 @@ async def handle(ws, message, server_data=None):
                 if embeds:
                     out_msg["embeds"] = embeds
 
+                if validated_attachments:
+                    out_msg["attachments"] = validated_attachments
+
                 if reply_to and replied_message:
                     out_msg["reply_to"] = {
                         "id": reply_to,
@@ -475,6 +508,11 @@ async def handle(ws, message, server_data=None):
                 ping_field = message.get("ping")
                 if ping_field is not None:
                     out_msg["ping"] = bool(ping_field)
+
+                if validated_attachments:
+                    from db import attachments as attachments_db
+                    att_ids = [a["id"] for a in validated_attachments]
+                    attachments_db.mark_attachments_referenced(att_ids)
 
                 if thread_id:
                     threads.save_thread_message(thread_id, out_msg)
@@ -697,7 +735,7 @@ async def handle(ws, message, server_data=None):
                 user_id, error = _require_user_id(ws)
                 if error:
                     return error
-                
+
                 message_id = message.get("id")
                 channel_name = message.get("channel")
                 thread_id = message.get("thread_id")
@@ -712,21 +750,21 @@ async def handle(ws, message, server_data=None):
                 if err:
                     msg, key = err
                     return _error(msg, match_cmd)
-                
+
                 if not ctx:
                     return _error("Channel or thread not found", match_cmd)
-                
+
                 is_thread = ctx["is_thread"]
                 parent_channel = ctx.get("parent_channel") or ctx.get("channel")
-                
+
                 if is_thread and thread_id:
                     msg_obj = threads.get_thread_message(thread_id, message_id)
                 else:
                     msg_obj = channels.get_channel_message(channel_name, message_id)
-                
+
                 if not msg_obj:
                     return _error("Message not found or cannot be deleted", match_cmd)
-                
+
                 if msg_obj.get("user") == user_id:
                     if not channels.can_user_delete_own(parent_channel, user_roles):
                         return _error(f"You do not have permission to delete your own message in this {'thread' if is_thread else 'channel'}", match_cmd)
@@ -734,10 +772,17 @@ async def handle(ws, message, server_data=None):
                     if not channels.does_user_have_permission(parent_channel, user_roles, "delete"):
                         return _error("You do not have permission to delete this message", match_cmd)
 
+                if msg_obj.get("attachments"):
+                    from db import attachments as attachments_db
+                    for att in msg_obj["attachments"]:
+                        att_id = att.get("id") if isinstance(att, dict) else att
+                        if att_id:
+                            attachments_db.delete_attachment(att_id)
+
                 if is_thread and thread_id:
                     if not threads.delete_thread_message(thread_id, message_id):
                         return _error("Failed to delete message", match_cmd)
-                    
+
                     username = users.get_username_by_id(user_id)
                     if server_data:
                         server_data["plugin_manager"].trigger_event("message_delete", ws, {
@@ -751,7 +796,7 @@ async def handle(ws, message, server_data=None):
                 else:
                     if not channels.delete_channel_message(channel_name, message_id):
                         return _error("Failed to delete message", match_cmd)
-                    
+
                     username = users.get_username_by_id(user_id)
                     if server_data:
                         server_data["plugin_manager"].trigger_event("message_delete", ws, {
@@ -760,7 +805,7 @@ async def handle(ws, message, server_data=None):
                             "user_id": user_id,
                             "username": username
                         }, server_data)
-                    return {"cmd": "message_delete", "id": message_id, "channel": channel_name, "global": True}
+                return {"cmd": "message_delete", "id": message_id, "channel": channel_name, "global": True}
             case "message_pin":
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
@@ -1468,6 +1513,12 @@ async def handle(ws, message, server_data=None):
                 return handle_role_permissions_set(ws, message, match_cmd)
             case "role_permissions_get":
                 return handle_role_permissions_get(ws, message, match_cmd)
+            case "self_role_add":
+                return handle_self_role_add(ws, message, match_cmd, server_data)
+            case "self_role_remove":
+                return handle_self_role_remove(ws, message, match_cmd, server_data)
+            case "self_roles_list":
+                return handle_self_roles_list(ws, message, match_cmd)
             case "channel_create":
                 return handle_channel_create(ws, message, match_cmd, server_data)
             case "channel_update":
@@ -1632,15 +1683,13 @@ async def handle(ws, message, server_data=None):
                 return handle_emoji_get_filename(ws, message, match_cmd)
             case "emoji_get_id":
                 return handle_emoji_get_id(ws, message, match_cmd)
-            case "slash_register":
-                return handle_slash_register(ws, message, match_cmd, server_data)
-            case "slash_list":
-                return handle_slash_list(ws, message, match_cmd, server_data)
-            case "slash_call":
-                return handle_slash_call(ws, message, match_cmd, server_data)
-            case "slash_response":
-                return handle_slash_response(ws, message, match_cmd, server_data)
+            case "attachment_delete":
+                return handle_attachment_delete(ws, message, server_data, match_cmd)
+            case "attachment_get":
+                return handle_attachment_get(ws, message, server_data, match_cmd)
             case "push_get_vapid":
+                return await push_handler.handle_push_get_vapid(ws)
+            case "push_subscribe":
                 return await push_handler.handle_push_get_vapid(ws)
             case "push_subscribe":
                 return await push_handler.handle_push_subscribe(ws, message)
@@ -1831,6 +1880,8 @@ async def handle(ws, message, server_data=None):
 
                 threads.join_thread(thread_id, user_id)
                 updated_thread = threads.get_thread(thread_id)
+                if not updated_thread:
+                    return _error("Thread not found", match_cmd)
                 username = users.get_username_by_id(user_id)
                 participant_ids = updated_thread.get("participants", [])
                 updated_thread["participants"] = [users.get_username_by_id(pid) for pid in participant_ids]
@@ -1851,6 +1902,8 @@ async def handle(ws, message, server_data=None):
 
                 threads.leave_thread(thread_id, user_id)
                 updated_thread = threads.get_thread(thread_id)
+                if not updated_thread:
+                    return _error("Thread not found", match_cmd)
                 username = users.get_username_by_id(user_id)
                 participant_ids = updated_thread.get("participants", [])
                 updated_thread["participants"] = [users.get_username_by_id(pid) for pid in participant_ids]

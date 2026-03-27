@@ -9,6 +9,16 @@ DEFAULT_CONFIG = {
     "uploads": {
         "emoji_allowed_file_types": ["gif", "jpg", "jpeg", "png"],
     },
+    "attachments": {
+        "enabled": True,
+        "max_size": 104857600,
+        "permanent_expiration_days": 365,
+        "permanent_tiers": ["pro", "max"],
+        "allowed_types": ["image/*", "video/*", "audio/*", "application/pdf"],
+        "uploads_per_minute": 10,
+        "subscription_cache_ttl": 300,
+        "max_attachments_per_user": -1,
+    },
     "rate_limiting": {
         "enabled": True,
         "messages_per_minute": 60,

@@ -5,14 +5,21 @@ __pycache__/
 *.env
 .mypy_cache/
 
-db/serverAssets/*                                                                                                                                                                                                                                                                                                    
-!db/serverAssets/.gitkeep                                                                                                                                                                                                                                                                                            
-db/serverEmojis/*                                                                                                                                                                                                                                                                                                    
+db/serverAssets/*
+!db/serverAssets/.gitkeep
+
+db/serverEmojis/*
 !db/serverEmojis/.gitkeep
+
+db/serverStickers/*
+!db/serverStickers/.gitkeep
+
+db/threadMessages/*
+!db/threadMessages/.gitkeep
+
+db/attachments/*
+!db/attachments/.gitkeep
 
 # VAPID keys — never commit the private key
 vapid/private_key.pem
 vapid/vapid_config.json
-
-db/threadMessages/*
-!db/threadMessages/.gitkeep

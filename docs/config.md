@@ -16,6 +16,41 @@ This file contains the main configuration for the OriginChats server. Below is a
 - **emoji_allowed_file_types**: *(list of str)*
   - Allowed file extensions for custom emoji uploads.
 
+## attachments
+
+- **enabled**: *(bool)*
+  - Whether the attachment system is enabled.
+- **max_size**: *(int)*
+  - Maximum file size for attachments in bytes. Default: 104857600 (100 MB).
+- **permanent_expiration_days**: *(int)*
+  - Number of days before permanent attachments expire. Default: 365.
+- **permanent_tiers**: *(list of str)*
+  - Rotur subscription tiers that can upload permanent attachments. Default: ["pro", "max"].
+  - Valid tiers: "lite", "plus", "drive", "pro", "max".
+- **allowed_types**: *(list of str)*
+  - Allowed MIME types for uploads. Supports wildcards (e.g., "image/*"). Default: ["image/*", "video/*", "audio/*", "application/pdf"].
+- **uploads_per_minute**: *(int)*
+  - Rate limit for attachment uploads per user. Default: 10.
+- **subscription_cache_ttl**: *(int)*
+  - Cache duration for Rotur subscription status checks in seconds. Default: 300.
+- **max_attachments_per_user**: *(int)*
+  - Maximum number of attachments a user can have at once. Default: -1 (unlimited).
+  - `-1`: Unlimited (only limited by expiration)
+  - `0`: Block all uploads
+  - `> 0`: Delete oldest attachment when limit reached
+
+### Expiration by File Size
+
+Non-permanent attachments have expiration times based on file size:
+
+| File Size | Expiration |
+|-----------|------------|
+| ≤ 5 MB | 7 weeks (49 days) |
+| 25 MB | 7 days |
+| 100 MB | 1 day |
+
+The expiration time scales smoothly between these points - smaller files last longer.
+
 ## rate_limiting
 
 - **enabled**: *(bool)*

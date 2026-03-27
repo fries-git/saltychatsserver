@@ -7,7 +7,7 @@ from handlers.auth import handle_authentication
 from handlers import message as message_handler
 from handlers.rate_limiter import RateLimiter
 from handlers import github_webhook
-from db import serverEmojis, push as push_db, webhooks as webhooks_db, channels, users, roles
+from db import serverEmojis, push as push_db, webhooks as webhooks_db, channels, users, roles, attachments as attachments_db
 import watchers
 from plugin_manager import PluginManager
 from logger import Logger
@@ -57,6 +57,13 @@ class OriginChatsServer:
         removed = push_db.cleanup_stale_subscriptions()
         if removed > 0:
             Logger.info(f"Cleaned up {removed} stale push subscriptions (inactive > 6 months)")
+
+        # Cleanup expired attachments on startup
+        attachment_config = self.config.get("attachments", {})
+        if attachment_config.get("enabled", True):
+            expired_count = attachments_db.cleanup_expired_attachments()
+            if expired_count > 0:
+                Logger.info(f"Cleaned up {expired_count} expired attachments")
 
         Logger.info(f"OriginChats WebSocket Server v{self.version} initialized")
         if self.rate_limiter:
@@ -260,6 +267,213 @@ class OriginChatsServer:
             **self._cors_headers()
         }))
 
+    async def _route_attachment(self, request):
+        attachment_id = request.match_info.get("attachment_id", "").strip()
+
+        if not attachment_id:
+            return self._apply_cors(web.Response(
+                status=400,
+                content_type="application/json",
+                text=json.dumps({"error": "Attachment ID required"})
+            ))
+
+        attachment_config = self.config.get("attachments", {})
+        if not attachment_config.get("enabled", True):
+            return self._apply_cors(web.Response(
+                status=503,
+                content_type="application/json",
+                text=json.dumps({"error": "Attachments are disabled"})
+            ))
+
+        attachment = attachments_db.get_attachment(attachment_id)
+        if not attachment:
+            return self._apply_cors(web.Response(
+                status=404,
+                content_type="application/json",
+                text=json.dumps({"error": "Attachment not found or expired"})
+            ))
+
+        file_path = attachments_db.get_attachment_file_path(attachment_id)
+        if not file_path or not os.path.isfile(file_path):
+            return self._apply_cors(web.Response(
+                status=404,
+                content_type="application/json",
+                text=json.dumps({"error": "Attachment file not found"})
+            ))
+
+        mime_type = attachment.get("mime_type", "application/octet-stream")
+
+        return self._apply_cors(web.FileResponse(
+            file_path,
+            headers={
+                "Content-Type": mime_type,
+                "Cache-Control": "public, max-age=3600",
+                **self._cors_headers()
+            }
+        ))
+
+    async def _route_attachment_upload(self, request):
+        content_type_header = request.headers.get("Content-Type", "")
+        if not content_type_header.startswith("application/json"):
+            return self._apply_cors(web.Response(
+                status=415,
+                content_type="application/json",
+                text=json.dumps({"error": "Content-Type must be application/json"})
+            ))
+
+        attachment_config = self.config.get("attachments", {})
+        if not attachment_config.get("enabled", True):
+            return self._apply_cors(web.Response(
+                status=503,
+                content_type="application/json",
+                text=json.dumps({"error": "Attachments are disabled"})
+            ))
+
+        try:
+            body = await request.read()
+        except Exception:
+            return self._apply_cors(web.Response(
+                status=400,
+                content_type="application/json",
+                text=json.dumps({"error": "Failed to read request body"})
+            ))
+
+        max_size = attachment_config.get("max_size", 104857600)
+        if len(body) > max_size:
+            return self._apply_cors(web.Response(
+                status=413,
+                content_type="application/json",
+                text=json.dumps({"error": f"Request body too large (max {max_size} bytes)"})
+            ))
+
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return self._apply_cors(web.Response(
+                status=400,
+                content_type="application/json",
+                text=json.dumps({"error": "Invalid JSON body"})
+            ))
+
+        validator_key = data.get("validator_key")
+        validator = data.get("validator")
+
+        if not validator_key or not validator:
+            return self._apply_cors(web.Response(
+                status=401,
+                content_type="application/json",
+                text=json.dumps({"error": "validator_key and validator are required for authentication"})
+            ))
+
+        import requests
+        from db import users as users_db, channels as channels_db, attachments as attachments_db
+        from handlers.rotur_api import has_permanent_upload
+
+        try:
+            auth_response = requests.get(
+                "https://api.rotur.dev/validate",
+                params={"key": validator_key, "v": validator},
+                timeout=10
+            )
+        except requests.RequestException:
+            return self._apply_cors(web.Response(
+                status=502,
+                content_type="application/json",
+                text=json.dumps({"error": "Failed to validate credentials"})
+            ))
+
+        if auth_response.status_code != 200 or auth_response.json().get("valid") != True:
+            return self._apply_cors(web.Response(
+                status=401,
+                content_type="application/json",
+                text=json.dumps({"error": "Invalid credentials"})
+            ))
+
+        auth_data = auth_response.json()
+        user_id = auth_data.get("id", "")
+        username = auth_data.get("username", "")
+
+        if not user_id:
+            return self._apply_cors(web.Response(
+                status=401,
+                content_type="application/json",
+                text=json.dumps({"error": "User ID not found in authentication response"})
+            ))
+
+        user_data = users_db.get_user(user_id)
+        if not user_data:
+            return self._apply_cors(web.Response(
+                status=401,
+                content_type="application/json",
+                text=json.dumps({"error": "User not found"})
+            ))
+
+        user_roles = user_data.get("roles", [])
+
+        file_data = data.get("file")
+        name = data.get("name")
+        mime_type = data.get("mime_type")
+        channel = data.get("channel")
+        expires_in_days = data.get("expires_in_days")
+
+        if not file_data or not name or not mime_type or not channel:
+            return self._apply_cors(web.Response(
+                status=400,
+                content_type="application/json",
+                text=json.dumps({"error": "Missing required fields: file, name, mime_type, channel"})
+            ))
+
+        if not channels_db.channel_exists(channel):
+            return self._apply_cors(web.Response(
+                status=404,
+                content_type="application/json",
+                text=json.dumps({"error": "Channel does not exist"})
+            ))
+
+        if not channels_db.does_user_have_permission(channel, user_roles, "send"):
+            return self._apply_cors(web.Response(
+                status=403,
+                content_type="application/json",
+                text=json.dumps({"error": "You don't have permission to send in this channel"})
+            ))
+
+        is_permanent = has_permanent_upload(username)
+
+        base_url = ""
+        if "server" in self.config and "url" in self.config["server"]:
+            base_url = self.config["server"]["url"].rstrip("/")
+
+        attachment = attachments_db.save_attachment(
+            file_data=file_data,
+            original_name=name,
+            mime_type=mime_type,
+            uploader_id=user_id,
+            uploader_name=username,
+            channel=channel,
+            permanent=is_permanent,
+            custom_expires_in_days=expires_in_days,
+        )
+
+        if not attachment:
+            return self._apply_cors(web.Response(
+                status=500,
+                content_type="application/json",
+                text=json.dumps({"error": "Failed to save attachment"})
+            ))
+
+        attachment_info = attachments_db.get_attachment_info_for_client(attachment, base_url)
+
+        Logger.success(f"Attachment uploaded via HTTP: {attachment['id']} by {username}")
+
+        return self._apply_cors(web.Response(
+            status=201,
+            content_type="application/json",
+            text=json.dumps({
+                "attachment": attachment_info,
+                "permanent": is_permanent
+            })
+        ))
+
     async def _route_webhook(self, request):
         token = request.rel_url.query.get("token")
         if not token:
@@ -405,11 +619,21 @@ class OriginChatsServer:
             connection_validator_key = "originChats-" + secrets.token_urlsafe(24)
             self._ws_data[ws_id]["validator_key"] = connection_validator_key
 
+            attachment_config = self.config.get("attachments", {})
+            attachments_info = {
+                "enabled": attachment_config.get("enabled", True),
+                "max_size": attachment_config.get("max_size", 104857600),
+                "allowed_types": attachment_config.get("allowed_types", ["image/*", "video/*", "audio/*", "application/pdf"]),
+                "max_attachments_per_user": attachment_config.get("max_attachments_per_user", -1),
+                "permanent_tiers": attachment_config.get("permanent_tiers", ["pro", "max"]),
+            }
+
             await send_to_client(ws, {
                 "cmd": "handshake",
                 "val": {
                     "server": self.config["server"],
                     "limits": self.config["limits"],
+                    "attachments": attachments_info,
                     "version": "1.1.0",
                     "validator_key": connection_validator_key,
                     "capabilities": self.capabilities
@@ -578,7 +802,11 @@ class OriginChatsServer:
         }
         self.plugin_manager.trigger_event("server_start", None, {}, server_data)
 
-        app = web.Application()
+        # Start the daily cleanup task
+        self._cleanup_task = asyncio.create_task(self._daily_cleanup_task())
+
+        max_upload_size = self.config.get("attachments", {}).get("max_size", 100 * 1024 * 1024)
+        app = web.Application(client_max_size=max_upload_size)
 
         # OPTIONS preflight for all routes
         app.router.add_route("OPTIONS", "/{path_info:.*}", self._route_options)
@@ -591,6 +819,8 @@ class OriginChatsServer:
         app.router.add_get("/info", self._route_info)
         app.router.add_get("/emojis/{filename}", self._route_emoji)
         app.router.add_get("/server-assets/{name}", self._route_server_asset)
+        app.router.add_get("/attachments/{attachment_id}", self._route_attachment)
+        app.router.add_post("/attachments/upload", self._route_attachment_upload)
 
         # Webhook (POST)
         app.router.add_post("/webhooks", self._route_webhook)
@@ -609,8 +839,22 @@ class OriginChatsServer:
         try:
             await asyncio.Future()  # run forever
         finally:
+            self._cleanup_task.cancel()
             if self.file_observer:
                 self.file_observer.stop()
                 self.file_observer.join()
-                Logger.info("File watcher stopped")
+            Logger.info("File watcher stopped")
             await runner.cleanup()
+
+    async def _daily_cleanup_task(self):
+        """Run attachment cleanup once every 24 hours."""
+        while True:
+            try:
+                await asyncio.sleep(24 * 60 * 60)  # 24 hours
+                result = attachments_db.run_daily_cleanup()
+                if result["total"] > 0:
+                    Logger.info(f"Daily cleanup: removed {result['total']} attachments")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                Logger.error(f"Error in daily cleanup task: {e}")

@@ -1,56 +1,60 @@
-# Client list for originChats
+# OriginChats Clients
 
+Existing clients you can use or learn from.
 
-## mistium - origin
-Boot https://origin.mistium.com and open the app store, find originChats by mist and install it
+---
 
-## allucat electron
-Source accessible here: https://github.com/Allucat1000/OriginChats
+## Available Clients
 
-## Stormy
-A web version can be found here https://github.com/antiviiris/originChats
+| Client | Platform | Link |
+|--------|----------|------|
+| **Mistium HTML** | Web | [originchats.mistium.com](https://originchats.mistium.com/) |
+| **Orion** | Web | [runnova.github.io/orion](https://runnova.github.io/orion/) |
+| **Milo** | Web | [originchats.milosantos.com](https://originchats.milosantos.com) |
+| **Allucat Electron** | Desktop | [github.com/Allucat1000/OriginChats](https://github.com/Allucat1000/OriginChats) |
+| **Stormy** | Web | [github.com/antiviiris/originChats](https://github.com/antiviiris/originChats) |
+| **Mistium Origin** | OriginOS | [origin.mistium.com](https://origin.mistium.com) (install via app store) |
 
-## orion
-Accessible here: https://runnova.github.io/orion/
+---
 
-## mistium html
-Accessible here: https://originchats.mistium.com/
+## Feature Comparison
 
-## milo
-Web version accessible here: https://originchats.milosantos.com
+| Feature | Mistium HTML | Orion | Milo | Allucat Electron | Stormy |
+|---------|:------------:|:-----:|:----:|:----------------:|:------:|
+| Message grouping | ✓ | ✓ | ✓ | ✓ | |
+| Role colors | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Edit messages | ✓ | | ✓ | ✓ | ✓ |
+| Delete messages | ✓ | ✓ | ✓ | ✓ | |
+| Links | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Markdown | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Reactions | | ✓ | ✓ | ✓ | |
+| Typing indicators | ✓ | ✓ | ✓ | ✓ | |
+| Replies | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Image embeds | ✓ | ✓ | ✓ | ✓ | |
+| GIFs (Tenor) | ✓ | ✓ | ✓ | ✓ | |
+| Pings | ✓ | ✓ | ✓ | ✓ | |
+| Pinned messages | ✓ | | ✓ | ✓ | |
+| Message search | ✓ | | ✓ | ✓ | |
+| Voice calling | ✓ | | ✓ | ✓ | |
+| Video streaming | ✓ | | ✓ | ✓ | |
+| Multiple servers | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-|                     | stormy | allucat electron | mistium origin | orion | mistium html | milo         |
-|---------------------|--------|------------------|----------------|-------|--------------|--------------|
-| message grouping    |        | yes              | yes            | yes   | yes          | yes          |
-| role colours        | yes    | yes              | yes            | yes   | yes          | yes          |
-| editing messages    | yes    | yes              | yes            |       | yes          | yes          |
-| deleting messages   |        | yes              | yes            | yes   | yes          | yes          |
-| links               | yes    | yes              |                | yes   | yes          | yes          |
-| infinite scrolling  |        | yes              |                | yes   | yes          | yes          |
-| emoji shortcodes    |        | yes              |                | yes   | yes          | yes          |
-| markdown            | yes    | yes              |                | yes   | yes          | yes          |
-| reactions           |        | yes              | yes            |       | yes          | yes          |
-| typing indicators   |        | yes              | yes            | yes   | yes          | yes          |
-| multiple servers    | yes    | yes              | yes            | yes   | yes          | yes          |
-| replies             | yes    | yes              | yes            | yes   | yes          | yes          |
-| image embeds        |        | yes              | yes            | yes   | yes          | yes          |
-| tenor and gifs      |        | yes              | yes            | yes   | yes          | yes          |
-| pings               |        | yes              | yes            | yes   | yes          | yes          |
-| rate limit handling |        | yes              | yes            |       | yes          | yes          |
-| profile view        |        | yes              | yes            | yes   | yes          | yes          |
-| pinned messages     |        | yes              | yes            |       | yes          | yes          |
-| message searching   |        | yes              |                |       | yes          | yes          |
-| user list           |        | yes              | yes            | yes   | yes          | yes          |
-| channel links (#)   |        | yes              |                |       | yes          | yes          |
-| message links (#$)  |        | yes              |                |       |              | yes          |
-| dms by default      |        |                  | yes            |       | yes          | yes          |
-| account settings    |        |                  | yes            |       | yes          |              |
-| server settings     |        |                  |                |       | yes          |              |
-| multiple servers    |        | yes              | yes            |       | yes          | yes          |
-| timeouts            |        | yes              | yes            |       |              | yes          |
-| server leaving      |        | yes              | yes            |       | yes          | yes          |
-| voice calling       |        | yes              |                |       | yes          | yes          |
-| video streaming     |        | yes              |                |       | yes          | yes          |
-| platform            | web    | electron         | originOS       | web   | web          | web/electron |
+**Legend:** ✓ = Supported, Empty = Not supported
 
-Table created with https://www.tablesgenerator.com/markdown_tables
+---
+
+## Recommended Clients
+
+- **For beginners:** Mistium HTML or Milo (works in browser, no setup)
+- **For desktop:** Allucat Electron (full-featured, standalone app)
+- **For developers:** Any client source code is useful for learning
+
+---
+
+## Building Your Own Client
+
+See [Client Development Guide](docs/clients.md) for how to build your own client.
+
+---
+
+**Last Updated:** 2026-03-25

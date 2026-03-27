@@ -1607,8 +1607,6 @@ async def handle(ws, message, server_data: dict):
             case "push_get_vapid":
                 return await push_handler.handle_push_get_vapid(ws)
             case "push_subscribe":
-                return await push_handler.handle_push_get_vapid(ws)
-            case "push_subscribe":
                 return await push_handler.handle_push_subscribe(ws, message)
             case "push_unsubscribe":
                 return await push_handler.handle_push_unsubscribe(ws, message)

@@ -40,10 +40,7 @@ def handle_emoji_delete(ws, message, match_cmd):
 
 
 def handle_emoji_get_all(ws, message, match_cmd):
-    user_id, error = _require_user_id(ws, "Authentication required")
-    if error:
-        return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    _, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
 
@@ -81,10 +78,7 @@ def handle_emoji_update(ws, message, match_cmd):
 
 
 def handle_emoji_get_filename(ws, message, match_cmd):
-    user_id, error = _require_user_id(ws, "Authentication required")
-    if error:
-        return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    _, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
 
@@ -104,10 +98,7 @@ def handle_emoji_get_filename(ws, message, match_cmd):
 
 
 def handle_emoji_get_id(ws, message, match_cmd):
-    user_id, error = _require_user_id(ws, "Authentication required")
-    if error:
-        return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    _, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
 

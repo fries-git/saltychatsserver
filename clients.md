@@ -56,4 +56,4 @@ See [Client Development Guide](docs/clients.md) for how to build your own client
 
 ---
 
-**Last Updated:** 2026-03-25
+**Last Updated:** 2026-03-28

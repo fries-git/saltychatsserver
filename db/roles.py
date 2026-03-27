@@ -346,14 +346,10 @@ def get_self_assignable_roles():
     """
     with _lock:
         roles_dict = _get_roles_cache()
-        self_assignable = []
+        self_assignable = {}
         for role_name, role_data in roles_dict.items():
             if role_data.get("self_assignable", False):
-                self_assignable.append({
-                    "name": role_name,
-                    "description": role_data.get("description", ""),
-                    "color": role_data.get("color")
-                })
+                self_assignable[role_name] = role_data
         return self_assignable
 
 

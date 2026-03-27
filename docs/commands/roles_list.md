@@ -29,6 +29,11 @@ None.
     "admin": {
       "description": "Administrator role with full permissions.",
       "color": "#FF0000"
+    },
+    "gamer": {
+      "description": "For gaming enthusiasts",
+      "color": "#00ff00",
+      "self_assignable": true
     }
   }
 }
@@ -41,11 +46,11 @@ None.
 
 ## Notes
 
-- Requires `owner` role.
 - Returns all roles as a dictionary keyed by role name.
 - Each role object contains:
   - `description`: Role description (optional)
   - `color`: Hex color code (optional)
+  - `self_assignable`: Boolean indicating if the role is self-assignable
 
 ## See Also
 

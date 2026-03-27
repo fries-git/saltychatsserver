@@ -155,12 +155,12 @@ def handle_role_delete(ws, message, match_cmd, server_data):
 
 
 def handle_roles_list(ws, message, match_cmd):
-    user_id, error = _require_user_id(ws, "Authentication required")
+    _, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
 
     all_roles = roles.get_all_roles()
-    return {"cmd": "roles_list", "roles": all_roles, "self_assignable_roles": roles.get_self_assignable_roles()}
+    return {"cmd": "roles_list", "roles": all_roles}
 
 
 def handle_role_permissions_set(ws, message, match_cmd):

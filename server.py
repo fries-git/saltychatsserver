@@ -194,6 +194,18 @@ class OriginChatsServer:
 
         return file_path
 
+    def _resolve_emoji_file_path_by_id(self, emoji_id):
+        """
+        Resolve emoji file path by emoji ID.
+        Returns absolute file path or None if not found.
+        """
+        if not emoji_id:
+            return None
+        file_name = serverEmojis.get_emoji_file_name(str(emoji_id))
+        if not file_name:
+            return None
+        return self._resolve_emoji_file_path(file_name)
+
     def _cors_headers(self):
         return {
             "Access-Control-Allow-Origin": "*",
@@ -248,8 +260,10 @@ class OriginChatsServer:
         ))
 
     async def _route_emoji(self, request):
-        file_name = unquote(request.match_info.get("filename", "")).strip()
-        file_path = self._resolve_emoji_file_path(file_name)
+        param = unquote(request.match_info.get("filename", "")).strip()
+        file_path = self._resolve_emoji_file_path(param)
+        if not file_path:
+            file_path = self._resolve_emoji_file_path_by_id(param)
         if not file_path:
             return self._apply_cors(web.Response(status=404, text="Emoji not found"))
         return self._apply_cors(web.FileResponse(file_path, headers={

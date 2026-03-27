@@ -9,7 +9,6 @@ Existing clients you can use or learn from.
 | Client | Platform | Link |
 |--------|----------|------|
 | **Mistium HTML** | Web | [originchats.mistium.com](https://originchats.mistium.com/) |
-| **Orion** | Web | [runnova.github.io/orion](https://runnova.github.io/orion/) |
 | **Milo** | Web | [originchats.milosantos.com](https://originchats.milosantos.com) |
 | **Allucat Electron** | Desktop | [github.com/Allucat1000/OriginChats](https://github.com/Allucat1000/OriginChats) |
 | **Stormy** | Web | [github.com/antiviiris/originChats](https://github.com/antiviiris/originChats) |
@@ -19,25 +18,25 @@ Existing clients you can use or learn from.
 
 ## Feature Comparison
 
-| Feature | Mistium HTML | Orion | Milo | Allucat Electron | Stormy |
-|---------|:------------:|:-----:|:----:|:----------------:|:------:|
-| Message grouping | ✓ | ✓ | ✓ | ✓ | |
-| Role colors | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Edit messages | ✓ | | ✓ | ✓ | ✓ |
-| Delete messages | ✓ | ✓ | ✓ | ✓ | |
-| Links | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Markdown | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Reactions | | ✓ | ✓ | ✓ | |
-| Typing indicators | ✓ | ✓ | ✓ | ✓ | |
-| Replies | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Image embeds | ✓ | ✓ | ✓ | ✓ | |
-| GIFs (Tenor) | ✓ | ✓ | ✓ | ✓ | |
-| Pings | ✓ | ✓ | ✓ | ✓ | |
-| Pinned messages | ✓ | | ✓ | ✓ | |
-| Message search | ✓ | | ✓ | ✓ | |
-| Voice calling | ✓ | | ✓ | ✓ | |
-| Video streaming | ✓ | | ✓ | ✓ | |
-| Multiple servers | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Feature | Mistium HTML | Milo | Allucat Electron | Stormy |
+|---------|:------------:|:----:|:----------------:|:------:|
+| Message grouping | ✓ | ✓ | ✓ | |
+| Role colors | ✓ | ✓ | ✓ | ✓ |
+| Edit messages | ✓ | ✓ | ✓ | ✓ |
+| Delete messages | ✓ | ✓ | ✓ | |
+| Links | ✓ | ✓ | ✓ | ✓ |
+| Markdown | ✓ | ✓ | ✓ | ✓ |
+| Reactions | ✓ | ✓ | ✓ | |
+| Typing indicators | ✓ | ✓ | ✓ | |
+| Replies | ✓ | ✓ | ✓ | ✓ |
+| Image embeds | ✓ | ✓ | ✓ | |
+| GIFs (Tenor) | ✓ | ✓ | ✓ | |
+| Pings | ✓ | ✓ | ✓ | |
+| Pinned messages | ✓ | ✓ | ✓ | |
+| Message search | ✓ | ✓ | ✓ | |
+| Voice calling | ✓ | ✓ | ✓ | |
+| Video streaming | ✓ | ✓ | ✓ | |
+| Multiple servers | ✓ | ✓ | ✓ | ✓ |
 
 **Legend:** ✓ = Supported, Empty = Not supported
 

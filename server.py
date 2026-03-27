@@ -243,6 +243,7 @@ class OriginChatsServer:
             "server": {
                 "name": self.config.get("server", {}).get("name", ""),
                 "icon": self.config.get("server", {}).get("icon", ""),
+                "banner": self.config.get("server", {}).get("banner", ""),
                 "owner": self.config.get("server", {}).get("owner", {})
             },
             "stats": {

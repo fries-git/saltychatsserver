@@ -2,10 +2,11 @@ import copy
 import json
 import os
 import threading
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from . import users
 from . import threads
 from .emoji_utils import is_valid_emoji
+from .message_utils import get_messages_around
 
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 channels_db_dir = os.path.join(_MODULE_DIR, "channels")
@@ -374,6 +375,12 @@ def get_channel_messages(channel_name, start, limit):
             return []
 
         return list(channel_data[begin:end])
+
+
+def get_channel_messages_around(channel_name: str, message_id: str, above: int = 50, below: int = 50) -> Tuple[Optional[List[dict]], Optional[int], Optional[int]]:
+    """Get messages centered around a specific message ID using grep for fast line lookup."""
+    channel_file = os.path.join(channels_db_dir, channel_name + ".json")
+    return get_messages_around(channel_file, message_id, above, below)
 
 
 def convert_messages_to_user_format(messages):

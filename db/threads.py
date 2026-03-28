@@ -3,9 +3,10 @@ import json
 import os
 import threading
 import uuid
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from . import users
 from .emoji_utils import is_valid_emoji
+from .message_utils import get_messages_around
 
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 threads_db_dir = os.path.join(_MODULE_DIR, "threads")
@@ -308,6 +309,12 @@ def get_thread_messages(thread_id: str, start=None, limit=100) -> List[dict]:
             return []
 
         return [copy.deepcopy(msg) for msg in messages[begin:end]]
+
+
+def get_thread_messages_around(thread_id: str, message_id: str, above: int = 50, below: int = 50) -> Tuple[Optional[List[dict]], Optional[int], Optional[int]]:
+    """Get messages centered around a specific message ID using grep for fast line lookup."""
+    messages_file = os.path.join(thread_messages_dir, f"{thread_id}.jsonl")
+    return get_messages_around(messages_file, message_id, above, below)
 
 
 def get_thread_message(thread_id: str, message_id: str) -> Optional[dict]:

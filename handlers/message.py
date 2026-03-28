@@ -926,7 +926,7 @@ async def handle(ws, message, server_data: dict):
                 user_id, error = _require_user_id(ws)
                 if error:
                     return error
-                
+
                 user_roles, error = _require_user_roles(user_id)
                 if error:
                     return error
@@ -938,10 +938,10 @@ async def handle(ws, message, server_data: dict):
 
                 if not ctx:
                     return _error("Channel or thread not found", match_cmd)
-                
+
                 is_thread = ctx["is_thread"]
                 parent_channel = ctx.get("parent_channel") or ctx.get("channel")
-                
+
                 if is_thread and thread_id:
                     messages = threads.get_thread_messages(thread_id, start, limit)
                     messages = threads.convert_messages_to_user_format(messages)
@@ -953,6 +953,50 @@ async def handle(ws, message, server_data: dict):
                     messages = channels.get_channel_messages(channel_name, start, limit)
                     messages = channels.convert_messages_to_user_format(messages)
                     return {"cmd": "messages_get", "channel": channel_name, "messages": messages, "range": {"start": start, "end": end}}
+            case "messages_around":
+                channel_name = message.get("channel")
+                thread_id = message.get("thread_id")
+                around = message.get("around")
+
+                if not around:
+                    return _error("around (message ID) is required", match_cmd)
+
+                user_id, error = _require_user_id(ws)
+                if error:
+                    return error
+
+                user_roles, error = _require_user_roles(user_id)
+                if error:
+                    return error
+
+                ctx, err = _get_channel_or_thread_context(channel_name, thread_id, user_id, user_roles)
+                if err:
+                    msg, key = err
+                    return _error(msg, match_cmd)
+
+                if not ctx:
+                    return _error("Channel or thread not found", match_cmd)
+
+                is_thread = ctx["is_thread"]
+                parent_channel = ctx.get("parent_channel") or ctx.get("channel")
+
+                bounds = message.get("bounds", {"above": 50, "below": 50})
+                above = min(bounds.get("above", 50), 200)
+                below = min(bounds.get("below", 50), 200)
+
+                if is_thread and thread_id:
+                    messages, start_idx, end_idx = threads.get_thread_messages_around(thread_id, around, above, below)
+                else:
+                    _, error = _require_text_channel_access(user_id, channel_name)
+                    if error:
+                        return error
+                    messages, start_idx, end_idx = channels.get_channel_messages_around(channel_name, around, above, below)
+
+                if messages is None:
+                    return _error("Message not found", match_cmd)
+
+                messages = channels.convert_messages_to_user_format(messages)
+                return {"cmd": "messages_around", "channel": parent_channel if is_thread else channel_name, "thread_id": thread_id if is_thread else None, "messages": messages, "range": {"start": start_idx, "end": end_idx}}
             case "message_get":
                 channel_name = message.get("channel")
                 thread_id = message.get("thread_id")

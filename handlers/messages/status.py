@@ -23,6 +23,7 @@ async def handle_status_set(ws, message, match_cmd, server_data):
     previous_status = _get_ws_attr(ws, "status", {}).get("status", "online")
     is_becoming_invisible = status == "invisible" and previous_status != "invisible"
     is_leaving_invisible = previous_status == "invisible" and status != "invisible"
+    broadcast_status_get = None
 
     if is_becoming_invisible:
         await broadcast_to_all(server_data["connected_clients"], {
@@ -45,21 +46,25 @@ async def handle_status_set(ws, message, match_cmd, server_data):
                 "color": color
             }
         }, server_data)
-        await broadcast_to_all(server_data["connected_clients"], {
+        broadcast_status_get = {
             "cmd": "status_get",
             "username": username,
-            "status": status_data
-        }, server_data)
+            "status": status_data,
+            "global": True
+        }
     elif status != "invisible":
-        await broadcast_to_all(server_data["connected_clients"], {
+        broadcast_status_get = {
             "cmd": "status_get",
             "username": username,
-            "status": status_data
-        }, server_data)
+            "status": status_data,
+            "global": True
+        }
 
     _set_ws_attr(ws, "status", status_data)
 
-    return {"cmd": "status_set", "status": status_data}
+    if broadcast_status_get:
+        return broadcast_status_get
+    return {"cmd": "status_set", "status": status_data, "global": True}
 
 
 def handle_status_get(ws, message, match_cmd, server_data):

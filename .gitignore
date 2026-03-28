@@ -14,12 +14,13 @@ db/serverEmojis/*
 db/serverStickers/*
 !db/serverStickers/.gitkeep
 
-db/threadMessages/*
-!db/threadMessages/.gitkeep
-
 db/attachments/*
 !db/attachments/.gitkeep
 
 # VAPID keys — never commit the private key
 vapid/private_key.pem
 vapid/vapid_config.json
+
+*.db
+*.db-wal
+*.db-shm

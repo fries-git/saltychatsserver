@@ -1,72 +1,19 @@
 import copy
-import json
-import os
 import threading
-import uuid
 import time
+import uuid
 from typing import Dict, List, Optional
 
-_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
-webhooks_file = os.path.join(_MODULE_DIR, "webhooks.json")
-DEFAULT_WEBHOOKS = {}
+from .database import init_db, execute, fetchone, fetchall
 
 _lock = threading.RLock()
 
-_webhooks_cache: Dict[str, dict] = {}
-_webhooks_loaded: bool = False
-
-
-def _load_webhooks() -> Dict[str, dict]:
-    global _webhooks_cache, _webhooks_loaded
-    try:
-        with open(webhooks_file, "r") as f:
-            _webhooks_cache = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        _webhooks_cache = {}
-    _webhooks_loaded = True
-    return _webhooks_cache
-
-
-def _save_webhooks(webhooks_dict: Dict[str, dict]) -> None:
-    global _webhooks_cache, _webhooks_loaded
-    tmp = webhooks_file + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(webhooks_dict, f, indent=4)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, webhooks_file)
-    _webhooks_cache = webhooks_dict
-    _webhooks_loaded = True
-
-
-def _get_webhooks_cache() -> Dict[str, dict]:
-    if not _webhooks_loaded:
-        _load_webhooks()
-    return _webhooks_cache
-
-
-def _ensure_storage():
-    os.makedirs(_MODULE_DIR, exist_ok=True)
-    if not os.path.exists(webhooks_file):
-        tmp = webhooks_file + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(DEFAULT_WEBHOOKS, f, indent=4)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, webhooks_file)
-
-
-_ensure_storage()
-
 
 def create_webhook(channel: str, name: str, created_by: str) -> Optional[dict]:
-    """
-    Create a new webhook for a channel.
-    Returns the webhook data including the token.
-    """
+    """Create a new webhook for a channel. Returns the webhook data including the token."""
+    init_db()
+    
     with _lock:
-        webhooks = _get_webhooks_cache()
-        
         webhook_id = str(uuid.uuid4())
         token = str(uuid.uuid4()) + str(uuid.uuid4()).replace("-", "")
         
@@ -80,121 +27,93 @@ def create_webhook(channel: str, name: str, created_by: str) -> Optional[dict]:
             "avatar": None
         }
         
-        webhooks[webhook_id] = webhook_data
-        _save_webhooks(webhooks)
+        execute(
+            "INSERT INTO webhooks (id, channel, name, token, created_by, created_at, avatar) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (webhook_id, channel, name, token, created_by, webhook_data["created_at"], None)
+        )
         
-        return copy.deepcopy(webhook_data)
+        return webhook_data
 
 
 def get_webhook(webhook_id: str) -> Optional[dict]:
-    """
-    Get a webhook by ID.
-    Returns webhook data without the token for security.
-    """
-    with _lock:
-        webhooks = _get_webhooks_cache()
-        webhook = webhooks.get(webhook_id)
-        if webhook:
-            result = copy.deepcopy(webhook)
-            return result
-        return None
+    """Get a webhook by ID. Returns webhook data without the token for security."""
+    init_db()
+    
+    row = fetchone("SELECT * FROM webhooks WHERE id = ?", (webhook_id,))
+    if row:
+        return dict(row)
+    return None
 
 
 def get_webhook_by_token(token: str) -> Optional[dict]:
-    """
-    Get a webhook by its token (for incoming webhook requests).
-    Returns full webhook data including token.
-    """
-    with _lock:
-        webhooks = _get_webhooks_cache()
-        for webhook_id, webhook in webhooks.items():
-            if webhook.get("token") == token:
-                return copy.deepcopy(webhook)
-        return None
+    """Get a webhook by its token (for incoming webhook requests). Returns full webhook data including token."""
+    init_db()
+    
+    row = fetchone("SELECT * FROM webhooks WHERE token = ?", (token,))
+    if row:
+        return dict(row)
+    return None
 
 
 def get_webhooks_for_channel(channel: str) -> List[dict]:
-    """
-    Get all webhooks for a channel.
-    Returns webhook data with webhook URLs but without tokens.
-    """
-    with _lock:
-        webhooks = _get_webhooks_cache()
-        result = []
-        for webhook in webhooks.values():
-            if webhook.get("channel") == channel:
-                wh_copy = copy.deepcopy(webhook)
-                result.append(wh_copy)
-        return result
+    """Get all webhooks for a channel. Returns webhook data with webhook URLs but without tokens."""
+    init_db()
+    
+    rows = fetchall("SELECT * FROM webhooks WHERE channel = ?", (channel,))
+    return [dict(row) for row in rows]
 
 
 def get_all_webhooks() -> List[dict]:
-    """
-    Get all webhooks.
-    Returns webhook data with webhook URLs but without tokens.
-    """
-    with _lock:
-        webhooks = _get_webhooks_cache()
-        result = []
-        for webhook in webhooks.values():
-            wh_copy = copy.deepcopy(webhook)
-            result.append(wh_copy)
-        return result
+    """Get all webhooks. Returns webhook data with webhook URLs but without tokens."""
+    init_db()
+    
+    rows = fetchall("SELECT * FROM webhooks")
+    return [dict(row) for row in rows]
 
 
 def delete_webhook(webhook_id: str) -> bool:
-    """
-    Delete a webhook by ID.
-    Returns True if deleted, False if not found.
-    """
+    """Delete a webhook by ID. Returns True if deleted, False if not found."""
+    init_db()
+    
     with _lock:
-        webhooks = _get_webhooks_cache()
-        if webhook_id in webhooks:
-            del webhooks[webhook_id]
-            _save_webhooks(webhooks)
-            return True
-        return False
+        result = execute("DELETE FROM webhooks WHERE id = ?", (webhook_id,))
+        return result.rowcount > 0
 
 
 def update_webhook(webhook_id: str, updates: dict) -> Optional[dict]:
-    """
-    Update a webhook.
-    Returns updated webhook data without token, or None if not found.
-    """
+    """Update a webhook. Returns updated webhook data without token, or None if not found."""
+    init_db()
+    
     with _lock:
-        webhooks = _get_webhooks_cache()
-        if webhook_id not in webhooks:
+        webhook = fetchone("SELECT * FROM webhooks WHERE id = ?", (webhook_id,))
+        if not webhook:
             return None
         
-        webhook = webhooks[webhook_id]
+        name = updates.get("name", webhook["name"])
+        avatar = updates.get("avatar", webhook.get("avatar"))
         
-        if "name" in updates:
-            webhook["name"] = updates["name"]
-        if "avatar" in updates:
-            webhook["avatar"] = updates["avatar"]
+        execute(
+            "UPDATE webhooks SET name = ?, avatar = ? WHERE id = ?",
+            (name, avatar, webhook_id)
+        )
         
-        _save_webhooks(webhooks)
-        
-        result = copy.deepcopy(webhook)
-        del result["token"]
+        result = dict(webhook)
+        result["name"] = name
+        result["avatar"] = avatar
         return result
 
 
 def webhook_exists_for_channel(channel: str, webhook_id: str) -> bool:
-    """
-    Check if a webhook exists and belongs to a specific channel.
-    """
-    with _lock:
-        webhooks = _get_webhooks_cache()
-        webhook = webhooks.get(webhook_id)
-        return webhook is not None and webhook.get("channel") == channel
+    """Check if a webhook exists and belongs to a specific channel."""
+    init_db()
+    
+    row = fetchone("SELECT id FROM webhooks WHERE id = ? AND channel = ?", (webhook_id, channel))
+    return row is not None
 
 
 def get_webhook_owner(webhook_id: str) -> Optional[str]:
-    """
-    Get the user ID of the webhook owner.
-    """
-    with _lock:
-        webhooks = _get_webhooks_cache()
-        webhook = webhooks.get(webhook_id)
-        return webhook.get("created_by") if webhook else None
+    """Get the user ID of the webhook owner."""
+    init_db()
+    
+    row = fetchone("SELECT created_by FROM webhooks WHERE id = ?", (webhook_id,))
+    return row["created_by"] if row else None

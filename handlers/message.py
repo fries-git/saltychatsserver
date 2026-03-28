@@ -217,13 +217,10 @@ def _get_thread_context(thread_id, user_id, user_roles, require_view=True):
     thread_data = threads.get_thread(thread_id)
     if not thread_data:
         return None, ("Thread not found", "thread_id")
-    
+
     if threads.is_thread_locked(thread_id):
         return None, ("This thread is locked", "thread_id")
-    
-    if threads.is_thread_archived(thread_id):
-        return None, ("This thread is archived", "thread_id")
-    
+
     parent_channel = thread_data.get("parent_channel")
     
     if require_view:
@@ -436,7 +433,7 @@ async def handle(ws, message, server_data: dict):
                     if threads.is_thread_locked(thread_id):
                         return _error("This thread is locked", match_cmd)
                     if threads.is_thread_archived(thread_id):
-                        return _error("This thread is archived", match_cmd)
+                        threads.update_thread(thread_id, {"archived": False})
                     parent_channel = thread_data.get("parent_channel")
                     if not channels.does_user_have_permission(parent_channel, user_roles, "send"):
                         return _error("You do not have permission to send messages in this thread", match_cmd)
@@ -986,7 +983,7 @@ async def handle(ws, message, server_data: dict):
 
                 if is_thread and thread_id:
                     messages, start_idx, end_idx = threads.get_thread_messages_around(thread_id, around, above, below)
-                else:
+                elif channel_name:
                     _, error = _require_text_channel_access(user_id, channel_name)
                     if error:
                         return error
@@ -1030,7 +1027,7 @@ async def handle(ws, message, server_data: dict):
                         return _error("Message not found", match_cmd)
                     msg = threads.convert_messages_to_user_format([msg])[0]
                     return {"cmd": "message_get", "channel": parent_channel, "thread_id": thread_id, "message": msg}
-                else:
+                elif channel_name:
                     _, error = _require_text_channel_access(user_id, channel_name)
                     if error:
                         return error
@@ -1833,9 +1830,6 @@ async def handle(ws, message, server_data: dict):
 
                 if threads.is_thread_locked(thread_id):
                     return _error("This thread is locked", match_cmd)
-
-                if threads.is_thread_archived(thread_id):
-                    return _error("This thread is archived", match_cmd)
 
                 threads.join_thread(thread_id, user_id)
                 updated_thread = threads.get_thread(thread_id)

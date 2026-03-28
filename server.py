@@ -247,11 +247,11 @@ class OriginChatsServer:
                 "owner": self.config.get("server", {}).get("owner", {})
             },
             "stats": {
-                "total_users": len(users._load_users()),
+                "total_users": users.count_users(),
                 "connected_users": len(self.connected_clients),
                 "online_users": len(self.connected_usernames),
                 "total_channels": len(channels._load_channels_index()),
-                "total_roles": len(roles._load_roles())
+                "total_roles": roles.count_roles()
             }
         }
         return self._apply_cors(web.Response(

@@ -472,29 +472,35 @@ def run_migration(backup=False, dry_run=False):
                 user_count += 1
             print(f"  Users: {user_count}")
     
-    # Migrate roles
-    print("\n[Migrating Roles]")
-    roles_file = DB_DIR / "roles.json"
-    if roles_file.exists():
-        roles_data = load_json(roles_file)
-        if roles_data:
-            role_count = 0
-            for role_name, role_data in roles_data.items():
-                if not dry_run:
-                    conn.execute(
-                        """INSERT OR REPLACE INTO roles (name, description, color, hoisted, permissions, self_assignable, category)
-                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                        (role_name,
-                         role_data.get("description"),
-                         role_data.get("color"),
-                         1 if role_data.get("hoisted") else 0,
-                         json_dumps(role_data.get("permissions", {})),
-                         1 if role_data.get("self_assignable") else 0,
-                         role_data.get("category"))
-                    )
-                    conn.commit()
-                role_count += 1
-            print(f"  Roles: {role_count}")
+# Migrate roles
+print("\n[Migrating Roles]")
+roles_file = DB_DIR / "roles.json"
+if roles_file.exists():
+    roles_data = load_json(roles_file)
+    if roles_data:
+        role_count = 0
+        position = 0
+        for role_name, role_data in roles_data.items():
+            if not dry_run:
+                perms = role_data.get("permissions", [])
+                if isinstance(perms, dict):
+                    perms = []
+                conn.execute(
+                    """INSERT OR REPLACE INTO roles (name, description, color, hoisted, permissions, self_assignable, category, position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (role_name,
+                    role_data.get("description"),
+                    role_data.get("color"),
+                    1 if role_data.get("hoisted") else 0,
+                    json_dumps(perms),
+                    1 if role_data.get("self_assignable") else 0,
+                    role_data.get("category"),
+                    position)
+                )
+                conn.commit()
+            role_count += 1
+            position += 1
+        print(f" Roles: {role_count}")
     
     conn.close()
     

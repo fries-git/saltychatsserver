@@ -80,13 +80,16 @@ def get_all_roles():
 
 def _process_role(row):
     """Convert database row to role dict."""
+    perms = _json_loads(row.get("permissions")) or []
+    if isinstance(perms, dict):
+        perms = []
     return {
         "id": row.get("id"),
         "name": row["name"],
         "description": row.get("description"),
         "color": row.get("color"),
         "hoisted": bool(row.get("hoisted", 0)),
-        "permissions": _json_loads(row.get("permissions")) or {},
+        "permissions": perms,
         "self_assignable": bool(row.get("self_assignable", 0)),
         "category": row.get("category"),
         "position": row.get("position", 0) or 0

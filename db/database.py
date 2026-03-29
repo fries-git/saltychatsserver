@@ -265,25 +265,28 @@ def _run_schema_migrations(conn):
                         position = 0
                         for role_name, role_data in roles_data.items():
                             role_id = str(uuid.uuid4())
+                            perms = role_data.get("permissions", [])
+                            if isinstance(perms, dict):
+                                perms = []
                             conn.execute(
                                 "INSERT INTO roles (id, name, description, color, hoisted, permissions, self_assignable, category, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                (role_id, 
-                                 role_name, 
-                                 role_data.get("description"), 
-                                 role_data.get("color"), 
-                                 1 if role_data.get("hoisted") else 0, 
-                                 json.dumps(role_data.get("permissions", {})), 
-                                 1 if role_data.get("self_assignable") else 0, 
-                                 role_data.get("category"),
-                                 position)
+                                (role_id,
+                                role_name,
+                                role_data.get("description"),
+                                role_data.get("color"),
+                                1 if role_data.get("hoisted") else 0,
+                                json.dumps(perms),
+                                1 if role_data.get("self_assignable") else 0,
+                                role_data.get("category"),
+                                position)
                             )
                             position += 1
                         print(f"[Migrated {position} roles from roles.json]")
                 except Exception as e:
                     print(f"Error migrating roles.json: {e}")
-                    if roles_count == 0 and not roles_table_exists:
+                    if roles_count == 0:
                         _insert_default_roles(conn, uuid, json)
-            elif roles_count == 0 and not roles_table_exists:
+            elif roles_count == 0:
                 _insert_default_roles(conn, uuid, json)
     except Exception as e:
         print(f"Migration error (roles table creation): {e}")
@@ -490,17 +493,22 @@ def _run_migration():
     # Migrate roles
     roles_file = os.path.join(db_dir, "roles.json")
     if os.path.exists(roles_file):
-        print("  Migrating roles...")
+        print(" Migrating roles...")
         with open(roles_file, 'r') as f:
             roles_data = json.load(f)
+        position = 0
         for role_name, role_data in roles_data.items():
             role_id = str(uuid.uuid4())
+            perms = role_data.get("permissions", [])
+            if isinstance(perms, dict):
+                perms = []
             conn.execute(
-                "INSERT OR REPLACE INTO roles (id, name, description, color, hoisted, permissions, self_assignable, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO roles (id, name, description, color, hoisted, permissions, self_assignable, category, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (role_id, role_name, role_data.get("description"), role_data.get("color"),
-                1 if role_data.get("hoisted") else 0, json_dumps(role_data.get("permissions", {})),
-                1 if role_data.get("self_assignable") else 0, role_data.get("category"))
+                1 if role_data.get("hoisted") else 0, json_dumps(perms),
+                1 if role_data.get("self_assignable") else 0, role_data.get("category"), position)
             )
+            position += 1
         conn.commit()
     
     # Migrate webhooks

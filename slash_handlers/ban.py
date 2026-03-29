@@ -5,6 +5,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db import users
 from logger import Logger
+from handlers.websocket_utils import disconnect_user
 
 
 def get_command_info():
@@ -51,6 +52,14 @@ async def handle(ws, args, channel, server_data):
     banned = users.ban_user(target_id)
     if not banned:
         return {"error": f"User '{target_username}' is already banned"}
+    
+    if server_data and "connected_clients" in server_data:
+        await disconnect_user(
+            server_data["connected_clients"],
+            target_username,
+            reason="You have been banned",
+            server_data=server_data
+        )
     
     if server_data and "plugin_manager" in server_data:
         server_data["plugin_manager"].trigger_event("user_ban", ws, {

@@ -1,4 +1,4 @@
-from db import channels, users, roles, serverEmojis, threads, permissions, polls
+from db import channels, users, roles, serverEmojis, threads, permissions as perms, polls
 import time, uuid, sys, os, asyncio, json, re
 from handlers.messages.webhook import handle_webhook_create, handle_webhook_get, handle_webhook_list, handle_webhook_delete, handle_webhook_update, handle_webhook_regenerate
 from handlers.messages.emoji import handle_emoji_add, handle_emoji_delete, handle_emoji_get_all, handle_emoji_update, handle_emoji_get_filename, handle_emoji_get_id
@@ -13,6 +13,7 @@ from handlers.messages.reaction import handle_react_add, handle_react_remove
 from handlers.messages.user import handle_user_update
 from handlers.messages.server import handle_server_update, handle_server_info
 from handlers.messages.poll import handle_poll_create, handle_poll_vote, handle_poll_end, handle_poll_results, handle_poll_get
+from handlers.messages.helpers import _require_permission
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logger import Logger
 from config_store import get_config_value
@@ -44,14 +45,14 @@ def _get_ws_username(ws):
     return _get_ws_attr(ws, "username", users.get_username_by_id(_get_ws_attr(ws, "user_id", "")))
 
 def _require_user_roles(user_id, *, requiredRoles = [], forbiddenRoles = [], missing_roles_message = "User roles not found"):
-    user_roles = users.get_user_roles(user_id)
-    for role in requiredRoles:
-        if not user_roles or role not in user_roles:
-            return None, _error(f"Access denied: '{role}' role required", None)
+	user_roles = users.get_user_roles(user_id)
+	for role in requiredRoles:
+		if not user_roles or role not in user_roles:
+			return None, _error(f"Access denied: '{role}' role required", None)
 
-    if not user_roles:
-        return None, _error(missing_roles_message, None)
-    return user_roles, None
+	if not user_roles:
+		return None, _error(missing_roles_message, None)
+	return user_roles, None
 
 def _require_text_channel_access(user_id, channel_name):
     if not channel_name:
@@ -1504,7 +1505,7 @@ async def handle(ws, message, server_data: dict):
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
                     return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+                error = _require_permission(user_id, "manage_users", match_cmd)
                 if error:
                     return error
 
@@ -1546,9 +1547,6 @@ async def handle(ws, message, server_data: dict):
                 return {"cmd": "user_roles_get", "user": username, "roles": updated_user.get("roles", []), "color": color, "global": True}
             case "user_roles_get":
                 user_id, error = _require_user_id(ws, "Authentication required")
-                if error:
-                    return error
-                _, error = _require_user_roles(user_id, requiredRoles=["owner"])
                 if error:
                     return error
 
@@ -1781,9 +1779,9 @@ async def handle(ws, message, server_data: dict):
                     return _error("User roles not found", match_cmd)
 
                 is_owner = thread_data.get("created_by") == user_id
-                is_admin = "owner" in user_roles or "admin" in user_roles
+                can_manage = perms.has_permission(user_id, "manage_threads")
 
-                if not is_owner and not is_admin:
+                if not is_owner and not can_manage:
                     return _error("You do not have permission to delete this thread", match_cmd)
 
                 threads.delete_thread(thread_id)
@@ -1806,9 +1804,9 @@ async def handle(ws, message, server_data: dict):
                     return _error("User roles not found", match_cmd)
 
                 is_owner = thread_data.get("created_by") == user_id
-                is_admin = "owner" in user_roles or "admin" in user_roles
+                can_manage = perms.has_permission(user_id, "manage_threads")
 
-                if not is_owner and not is_admin:
+                if not is_owner and not can_manage:
                     return _error("You do not have permission to update this thread", match_cmd)
 
                 updates = {}
@@ -1818,7 +1816,7 @@ async def handle(ws, message, server_data: dict):
                         updates["name"] = name
                     else:
                         return _error("Thread name cannot be empty", match_cmd)
-                if "locked" in message and is_admin:
+                if "locked" in message and can_manage:
                     updates["locked"] = bool(message["locked"])
                 if "archived" in message:
                     updates["archived"] = bool(message["archived"])

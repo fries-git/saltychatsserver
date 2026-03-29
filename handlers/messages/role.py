@@ -1,5 +1,5 @@
 from db import roles, users, channels, permissions
-from handlers.messages.helpers import _error, _require_user_id, _require_user_roles, _require_permission, _require_can_manage_role
+from handlers.messages.helpers import _error, _require_user_id, _require_permission, _require_can_manage_role
 from handlers.websocket_utils import broadcast_to_all
 
 

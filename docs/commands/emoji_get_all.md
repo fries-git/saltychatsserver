@@ -1,6 +1,6 @@
 # Command: emoji_get_all
 
-Return all custom server emojis (owner only).
+Return all custom server emojis.
 
 ## Request
 
@@ -29,12 +29,10 @@ Return all custom server emojis (owner only).
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
 - `{"cmd": "error", "val": "Invalid emoji_get_all command scheme: ..."}` - When validation fails
 
 ## Notes
 
-- Requires `owner` role.
 - Response keys are emoji IDs as strings.
 
 ## See Also

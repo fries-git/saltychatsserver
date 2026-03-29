@@ -113,7 +113,7 @@ def add_role(role_name, role_data):
             role_data.get("description"),
             role_data.get("color"),
             1 if role_data.get("hoisted") else 0,
-            _json_dumps(role_data.get("permissions", {})),
+            _json_dumps(role_data.get("permissions", [])),
             1 if role_data.get("self_assignable") else 0,
             role_data.get("category"))
         )
@@ -136,7 +136,7 @@ def update_role(role_id_or_name, role_data):
              role_data.get("description"),
              role_data.get("color"),
              1 if role_data.get("hoisted") else 0,
-             _json_dumps(role_data.get("permissions", {})),
+             _json_dumps(role_data.get("permissions", [])),
              1 if role_data.get("self_assignable") else 0,
              role_data.get("category"),
              role_id)

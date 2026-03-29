@@ -264,8 +264,8 @@ def handle_role_permissions_set(ws, message, match_cmd):
         return _error("Role not found", match_cmd)
 
     permissions = message.get("permissions")
-    if not isinstance(permissions, dict):
-        return _error("Permissions must be an object", match_cmd)
+    if not isinstance(permissions, list):
+        return _error("Permissions must be an array", match_cmd)
 
     role_data = roles.get_role(role_id_or_name)
     if not role_data:

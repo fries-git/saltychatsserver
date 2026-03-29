@@ -336,24 +336,25 @@ def convert_messages_to_user_format(messages: List[dict]) -> List[dict]:
 def save_channel_message(channel_name: str, message: dict) -> bool:
     """Save a message to a specific channel."""
     init_db()
-    
+
     message_id = message.get("id")
     if not message_id:
         return False
-    
+
     execute(
         """INSERT INTO messages
-           (id, channel, thread_id, user_id, content, timestamp, 
-            reply_to_id, reply_to_user, attachments, embeds, webhook)
-           VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (id, channel, thread_id, user_id, content, timestamp,
+            reply_to_id, reply_to_user, attachments, embeds, webhook, interaction)
+            VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (message_id, channel_name, message.get("user"), message.get("content", ""),
          message.get("timestamp"), message.get("reply_to", {}).get("id"),
          message.get("reply_to", {}).get("user"),
          _json_dumps(message.get("attachments")),
          _json_dumps(message.get("embeds")),
-         _json_dumps(message.get("webhook")))
+         _json_dumps(message.get("webhook")),
+         _json_dumps(message.get("interaction")))
     )
-    
+
     return True
 
 

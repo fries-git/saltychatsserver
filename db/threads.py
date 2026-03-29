@@ -150,17 +150,19 @@ def save_thread_message(thread_id: str, message: dict) -> bool:
     parent_channel = thread.get("parent_channel")
     
     execute(
-        """INSERT INTO messages 
-           (id, channel, thread_id, user_id, content, timestamp, 
-            reply_to_id, reply_to_user, attachments, embeds)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO messages
+            (id, channel, thread_id, user_id, content, timestamp,
+            reply_to_id, reply_to_user, attachments, embeds, webhook, interaction)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (message_id, parent_channel, thread_id, message.get("user"), message.get("content", ""),
          message.get("timestamp"), message.get("reply_to", {}).get("id"),
          message.get("reply_to", {}).get("user"),
          _json_dumps(message.get("attachments")),
-         _json_dumps(message.get("embeds")))
+         _json_dumps(message.get("embeds")),
+         _json_dumps(message.get("webhook")),
+         _json_dumps(message.get("interaction")))
     )
-    
+
     return True
 
 

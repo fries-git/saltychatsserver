@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS messages (
     attachments TEXT,
     embeds TEXT,
     webhook TEXT,
+    interaction TEXT,
     created_at REAL
 );
 
@@ -116,15 +117,18 @@ CREATE INDEX IF NOT EXISTS idx_users_validator ON users(validator);
 
 -- Roles table
 CREATE TABLE IF NOT EXISTS roles (
-name TEXT PRIMARY KEY,
-description TEXT,
-color TEXT,
-hoisted INTEGER DEFAULT 0,
-permissions TEXT,
-self_assignable INTEGER DEFAULT 0,
-category TEXT,
-position INTEGER DEFAULT 0
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT,
+    color TEXT,
+    hoisted INTEGER DEFAULT 0,
+    permissions TEXT,
+    self_assignable INTEGER DEFAULT 0,
+    category TEXT,
+    position INTEGER DEFAULT 0
 );
+
+CREATE INDEX IF NOT EXISTS idx_roles_name ON roles(name);
 """
 
 
@@ -167,11 +171,56 @@ def init_db(db_path: Optional[str] = None) -> None:
 
 def _run_schema_migrations(conn):
     """Run schema migrations for existing databases."""
+    import uuid
+    
+    # Add position column to roles if missing
     try:
         cursor = conn.execute("PRAGMA table_info(roles)")
         columns = [row[1] for row in cursor.fetchall()]
         if "position" not in columns:
             conn.execute("ALTER TABLE roles ADD COLUMN position INTEGER DEFAULT 0")
+    except Exception:
+        pass
+
+    try:
+        cursor = conn.execute("PRAGMA table_info(roles)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "id" not in columns:
+            cursor = conn.execute("SELECT name FROM roles")
+            existing_roles = [row[0] for row in cursor.fetchall()]
+            
+            conn.execute("""
+                CREATE TABLE roles_new (
+                    id TEXT PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL,
+                    description TEXT,
+                    color TEXT,
+                    hoisted INTEGER DEFAULT 0,
+                    permissions TEXT,
+                    self_assignable INTEGER DEFAULT 0,
+                    category TEXT,
+                    position INTEGER DEFAULT 0
+                )
+            """)
+            
+            for role_name in existing_roles:
+                role_id = str(uuid.uuid4())
+                conn.execute("""
+                    INSERT INTO roles_new (id, name, description, color, hoisted, permissions, self_assignable, category, position)
+                    SELECT ?, name, description, color, hoisted, permissions, self_assignable, category, position
+                    FROM roles WHERE name = ?
+                """, (role_id, role_name))
+            
+        conn.execute("DROP TABLE roles")
+        conn.execute("ALTER TABLE roles_new RENAME TO roles")
+    except Exception:
+        pass
+
+    try:
+        cursor = conn.execute("PRAGMA table_info(messages)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "interaction" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN interaction TEXT")
     except Exception:
         pass
 
@@ -217,8 +266,9 @@ def _handle_first_time_setup():
 
 def _create_default_data():
     """Create default channels and roles for a fresh installation."""
+    import uuid
     conn = get_connection()
-    
+
     # Default roles
     default_roles = {
         "owner": {"description": "Server owner with ultimate permissions.", "color": "#d5beff", "hoisted": True},
@@ -226,12 +276,13 @@ def _create_default_data():
         "moderator": {"description": "Moderator role with elevated permissions.", "color": "#FFFF00", "hoisted": True},
         "user": {"description": "Regular user role with standard permissions.", "color": "#FFFFFF", "hoisted": False},
     }
-    
+
     for role_name, role_data in default_roles.items():
+        role_id = str(uuid.uuid4())
         conn.execute(
-            "INSERT OR IGNORE INTO roles (name, description, color, hoisted, permissions, self_assignable, category) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (role_name, role_data.get("description"), role_data.get("color"),
-             1 if role_data.get("hoisted") else 0, "{}", 0, None)
+            "INSERT OR IGNORE INTO roles (id, name, description, color, hoisted, permissions, self_assignable, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (role_id, role_name, role_data.get("description"), role_data.get("color"),
+            1 if role_data.get("hoisted") else 0, "{}", 0, None)
         )
     
     # Default channels
@@ -258,7 +309,8 @@ def _run_migration():
     """Run the migration from JSON files to SQLite."""
     import json
     import time as time_module
-    
+    import uuid
+
     db_dir = os.path.dirname(_DB_PATH)
     
     # Create the database with schema
@@ -293,13 +345,12 @@ def _run_migration():
         with open(roles_file, 'r') as f:
             roles_data = json.load(f)
         for role_name, role_data in roles_data.items():
+            role_id = str(uuid.uuid4())
             conn.execute(
-                "INSERT OR REPLACE INTO roles (name, description, color, hoisted, permissions, self_assignable, category) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (role_name, role_data.get("description"), role_data.get("color"),
-                 1 if role_data.get("hoisted") else 0,
-                 json_dumps(role_data.get("permissions", {})),
-                 1 if role_data.get("self_assignable") else 0,
-                 role_data.get("category"))
+                "INSERT OR REPLACE INTO roles (id, name, description, color, hoisted, permissions, self_assignable, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (role_id, role_name, role_data.get("description"), role_data.get("color"),
+                1 if role_data.get("hoisted") else 0, json_dumps(role_data.get("permissions", {})),
+                1 if role_data.get("self_assignable") else 0, role_data.get("category"))
             )
         conn.commit()
     

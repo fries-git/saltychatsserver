@@ -34,9 +34,10 @@ async def handle_role_create(ws, message, match_cmd, server_data):
     if roles.role_exists(role_name):
         return _error("Role already exists", match_cmd)
 
-    created = roles.add_role(role_name, role_data)
+    role_id = roles.add_role(role_name, role_data)
     if server_data:
         server_data["plugin_manager"].trigger_event("role_create", ws, {
+            "role_id": role_id,
             "role_name": role_name,
             "description": message.get("description", ""),
             "color": message.get("color")
@@ -47,7 +48,7 @@ async def handle_role_create(ws, message, match_cmd, server_data):
         "roles": roles.get_all_roles()
     }, server_data)
 
-    return {"cmd": "role_create", "name": role_name, "created": created}
+    return {"cmd": "role_create", "id": role_id, "name": role_name}
 
 
 async def handle_role_reorder(ws, message, match_cmd, server_data):
@@ -86,17 +87,27 @@ async def handle_role_update(ws, message, match_cmd, server_data):
     if error:
         return error
 
-    role_name = message.get("name")
-    if not role_name:
-        return _error("Role name is required", match_cmd)
+    role_id_or_name = message.get("id") or message.get("name")
+    if not role_id_or_name:
+        return _error("Role id or name is required", match_cmd)
 
-    if not roles.role_exists(role_name):
+    if not roles.role_exists(role_id_or_name):
         return _error("Role not found", match_cmd)
 
-    role_data = roles.get_role(role_name)
+    role_data = roles.get_role(role_id_or_name)
     if not role_data:
         return _error("Role not found", match_cmd)
 
+    new_name = message.get("name")
+    if new_name is not None and new_name != role_data.get("name"):
+        old_name = role_data.get("name")
+        all_channels = channels.get_channels()
+        for channel in all_channels:
+            perms = channel.get("permissions", {})
+            for perm_type, perm_roles in perms.items():
+                if isinstance(perm_roles, list) and old_name in perm_roles:
+                    return _error(f"Cannot rename role: it is used in channel '{channel.get('name')}' permissions", match_cmd)
+        role_data["name"] = new_name
     if message.get("description") is not None:
         role_data["description"] = message["description"]
     if "color" in message:
@@ -104,28 +115,29 @@ async def handle_role_update(ws, message, match_cmd, server_data):
     if message.get("hoisted") is not None:
         role_data["hoisted"] = message["hoisted"]
     if message.get("self_assignable") is not None:
-        if message["self_assignable"] and not roles.can_be_self_assignable(role_name):
-            return _error(f"Role '{role_name}' cannot be made self-assignable", match_cmd)
+        if message["self_assignable"] and not roles.can_be_self_assignable(role_id_or_name):
+            return _error(f"Role '{role_data.get('name')}' cannot be made self-assignable", match_cmd)
         role_data["self_assignable"] = message["self_assignable"]
     if message.get("permissions") is not None:
         role_data["permissions"] = message["permissions"]
     if "category" in message:
         role_data["category"] = message["category"]
 
-    updated = roles.update_role(role_name, role_data)
+    updated = roles.update_role(role_id_or_name, role_data)
     if server_data:
         server_data["plugin_manager"].trigger_event("role_update", ws, {
-            "role_name": role_name,
+            "role_id": role_data.get("id"),
+            "role_name": role_data.get("name"),
             "description": role_data.get("description", ""),
             "color": role_data.get("color")
         }, server_data)
 
-        await broadcast_to_all(server_data["connected_clients"], {
-            "cmd": "roles_list",
-            "roles": roles.get_all_roles()
-        }, server_data)
+    await broadcast_to_all(server_data["connected_clients"], {
+        "cmd": "roles_list",
+        "roles": roles.get_all_roles()
+    }, server_data)
 
-    return {"cmd": "role_update", "name": role_name, "updated": updated}
+    return {"cmd": "role_update", "id": role_data.get("id"), "name": role_data.get("name"), "updated": updated}
 
 
 async def handle_role_set(ws, message, match_cmd, server_data):
@@ -136,31 +148,34 @@ async def handle_role_set(ws, message, match_cmd, server_data):
     if error:
         return error
 
-    role_name = message.get("name")
-    if not role_name:
-        return _error("Role name is required", match_cmd)
+    role_id_or_name = message.get("id") or message.get("name")
+    if not role_id_or_name:
+        return _error("Role id or name is required", match_cmd)
 
     role_data = message.get("data")
     if not role_data or not isinstance(role_data, dict):
         return _error("Role data is required", match_cmd)
 
-    if not roles.role_exists(role_name):
+    if not roles.role_exists(role_id_or_name):
         return _error("Role not found", match_cmd)
 
-    updated = roles.update_role(role_name, role_data)
+    updated = roles.update_role(role_id_or_name, role_data)
+    role = roles.get_role(role_id_or_name)
+    
     if server_data:
         server_data["plugin_manager"].trigger_event("role_update", ws, {
-            "role_name": role_name,
+            "role_id": role.get("id"),
+            "role_name": role.get("name"),
             "description": role_data.get("description", ""),
             "color": role_data.get("color")
         }, server_data)
 
-        await broadcast_to_all(server_data["connected_clients"], {
-            "cmd": "roles_list",
-            "roles": roles.get_all_roles()
-        }, server_data)
+    await broadcast_to_all(server_data["connected_clients"], {
+        "cmd": "roles_list",
+        "roles": roles.get_all_roles()
+    }, server_data)
 
-    return {"cmd": "role_set", "name": role_name, "updated": updated}
+    return {"cmd": "role_set", "id": role.get("id"), "name": role.get("name"), "updated": updated}
 
 
 async def handle_role_delete(ws, message, match_cmd, server_data):
@@ -171,20 +186,18 @@ async def handle_role_delete(ws, message, match_cmd, server_data):
     if error:
         return error
 
-    role_name = message.get("name")
-    if not role_name:
-        return _error("Role name is required", match_cmd)
+    role_id_or_name = message.get("id") or message.get("name")
+    if not role_id_or_name:
+        return _error("Role id or name is required", match_cmd)
 
-    if not roles.role_exists(role_name):
+    role = roles.get_role(role_id_or_name)
+    if not role:
         return _error("Role not found", match_cmd)
+
+    role_name = role.get("name")
 
     if role_name in ["owner", "admin", "user"]:
         return _error("Cannot delete system roles", match_cmd)
-
-    all_users = users.get_users()
-    for user in all_users:
-        if role_name in user.get("roles", []):
-            return _error(f"Role is assigned to user '{user.get('username')}'", match_cmd)
 
     all_channels = channels.get_channels()
     for channel in all_channels:
@@ -193,18 +206,21 @@ async def handle_role_delete(ws, message, match_cmd, server_data):
             if isinstance(perm_roles, list) and role_name in perm_roles:
                 return _error(f"Role is used in channel '{channel.get('name')}' permissions", match_cmd)
 
-    deleted = roles.delete_role(role_name)
+    users.remove_role_from_all_users(role_name)
+
+    deleted = roles.delete_role(role_id_or_name)
     if server_data:
         server_data["plugin_manager"].trigger_event("role_delete", ws, {
+            "role_id": role.get("id"),
             "role_name": role_name
         }, server_data)
 
-        await broadcast_to_all(server_data["connected_clients"], {
-            "cmd": "roles_list",
-            "roles": roles.get_all_roles()
-        }, server_data)
+    await broadcast_to_all(server_data["connected_clients"], {
+        "cmd": "roles_list",
+        "roles": roles.get_all_roles()
+    }, server_data)
 
-    return {"cmd": "role_delete", "name": role_name, "deleted": deleted}
+    return {"cmd": "role_delete", "id": role.get("id"), "name": role_name, "deleted": deleted}
 
 
 def handle_roles_list(ws, message, match_cmd):
@@ -224,24 +240,24 @@ def handle_role_permissions_set(ws, message, match_cmd):
     if error:
         return error
 
-    role_name = message.get("name")
-    if not role_name:
-        return _error("Role name is required", match_cmd)
+    role_id_or_name = message.get("id") or message.get("name")
+    if not role_id_or_name:
+        return _error("Role id or name is required", match_cmd)
 
-    if not roles.role_exists(role_name):
+    if not roles.role_exists(role_id_or_name):
         return _error("Role not found", match_cmd)
 
     permissions = message.get("permissions")
     if not isinstance(permissions, dict):
         return _error("Permissions must be an object", match_cmd)
 
-    role_data = roles.get_role(role_name)
+    role_data = roles.get_role(role_id_or_name)
     if not role_data:
         return _error("Role not found", match_cmd)
     role_data["permissions"] = permissions
-    updated = roles.update_role(role_name, role_data)
+    updated = roles.update_role(role_id_or_name, role_data)
 
-    return {"cmd": "role_permissions_set", "name": role_name, "permissions": permissions, "updated": updated}
+    return {"cmd": "role_permissions_set", "id": role_data.get("id"), "name": role_data.get("name"), "permissions": permissions, "updated": updated}
 
 
 def handle_role_permissions_get(ws, message, match_cmd):
@@ -249,12 +265,13 @@ def handle_role_permissions_get(ws, message, match_cmd):
     if error:
         return error
 
-    role_name = message.get("name")
-    if not role_name:
-        return _error("Role name is required", match_cmd)
+    role_id_or_name = message.get("id") or message.get("name")
+    if not role_id_or_name:
+        return _error("Role id or name is required", match_cmd)
 
-    if not roles.role_exists(role_name):
+    if not roles.role_exists(role_id_or_name):
         return _error("Role not found", match_cmd)
 
-    role_perms = roles.get_role_permissions(role_name)
-    return {"cmd": "role_permissions_get", "name": role_name, "permissions": role_perms}
+    role_perms = roles.get_role_permissions(role_id_or_name)
+    role = roles.get_role(role_id_or_name)
+    return {"cmd": "role_permissions_get", "id": role.get("id"), "name": role.get("name"), "permissions": role_perms}

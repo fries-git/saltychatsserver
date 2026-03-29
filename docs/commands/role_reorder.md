@@ -13,7 +13,7 @@ Reorder all roles by providing a new order (owner only).
 
 ### Fields
 
-- `roles`: (required) Array of role names in the desired order. All existing roles must be included.
+- `roles`: (required) Array of role names or IDs in the desired order. All existing roles must be included.
 
 ## Response
 
@@ -54,6 +54,7 @@ Returns to the requester:
 
 - Requires `owner` role.
 - All existing roles must be included in the reorder array.
+- You can use either role names or role IDs in the array.
 - The order determines how roles are displayed and their priority.
 - Roles are returned in order by `roles_list` after reordering.
 

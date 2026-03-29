@@ -18,25 +18,28 @@ def save_message(
     reply_to_user: Optional[str] = None,
     attachments: Optional[List] = None,
     embeds: Optional[Dict] = None,
+    webhook: Optional[Dict] = None,
+    interaction: Optional[Dict] = None,
     timestamp: Optional[float] = None
 ) -> str:
     """Save a new message to the database."""
     init_db()
-    
+
     if message_id is None:
         message_id = str(uuid.uuid4())
     if timestamp is None:
         timestamp = time.time()
-    
+
     execute(
-        """INSERT INTO messages 
-           (id, channel, thread_id, user_id, content, timestamp, 
-            reply_to_id, reply_to_user, attachments, embeds)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO messages
+        (id, channel, thread_id, user_id, content, timestamp,
+        reply_to_id, reply_to_user, attachments, embeds, webhook, interaction)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (message_id, channel, thread_id, user_id, content, timestamp,
-         reply_to_id, reply_to_user, _json_dumps(attachments), _json_dumps(embeds))
+        reply_to_id, reply_to_user, _json_dumps(attachments), _json_dumps(embeds),
+        _json_dumps(webhook), _json_dumps(interaction))
     )
-    
+
     return message_id
 
 
@@ -58,7 +61,9 @@ def get_message(message_id: str) -> Optional[Dict[str, Any]]:
     msg['pinned'] = bool(msg.get('pinned', 0))
     msg['attachments'] = _json_loads(msg.get('attachments'))
     msg['embeds'] = _json_loads(msg.get('embeds'))
-    
+    msg['webhook'] = _json_loads(msg.get('webhook'))
+    msg['interaction'] = _json_loads(msg.get('interaction'))
+
     return msg
 
 
@@ -113,7 +118,9 @@ def get_messages(
         msg['pinned'] = bool(msg.get('pinned', 0))
         msg['attachments'] = _json_loads(msg.get('attachments'))
         msg['embeds'] = _json_loads(msg.get('embeds'))
-    
+        msg['webhook'] = _json_loads(msg.get('webhook'))
+        msg['interaction'] = _json_loads(msg.get('interaction'))
+
     return messages
 
 
@@ -184,7 +191,9 @@ def get_messages_around(
         msg['pinned'] = bool(msg.get('pinned', 0))
         msg['attachments'] = _json_loads(msg.get('attachments'))
         msg['embeds'] = _json_loads(msg.get('embeds'))
-    
+        msg['webhook'] = _json_loads(msg.get('webhook'))
+        msg['interaction'] = _json_loads(msg.get('interaction'))
+
     start_idx = 0
     for i, msg in enumerate(messages):
         if msg['id'] == message_id:
@@ -350,12 +359,14 @@ def search_messages(channel: str, query: str, thread_id: Optional[str] = None) -
         msg['pinned'] = bool(msg.get('pinned', 0))
         msg['attachments'] = _json_loads(msg.get('attachments'))
         msg['embeds'] = _json_loads(msg.get('embeds'))
+        msg['webhook'] = _json_loads(msg.get('webhook'))
+        msg['interaction'] = _json_loads(msg.get('interaction'))
         msg_reactions = fetchall(
             "SELECT emoji, user_id FROM reactions WHERE message_id = ?",
             (msg['id'],)
         )
         msg['reactions'] = _reactions_to_dict(msg_reactions)
-    
+
     return messages
 
 

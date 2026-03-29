@@ -19,7 +19,10 @@ Create a new role (owner only).
 - `name`: (required) The name of the new role. Must be unique.
 - `description`: (optional) A description of the role.
 - `color`: (optional) Hex color code for the role (e.g., "#FF0000").
+- `hoisted`: (optional) Boolean. If `true`, the role is displayed separately in the user list.
 - `self_assignable`: (optional) Boolean. If `true`, users can assign this role to themselves. Protected roles (`owner`, `admin`, `moderator`) cannot be made self-assignable.
+- `category`: (optional) Category name for grouping roles.
+- `permissions`: (optional) Permissions object for the role.
 
 ## Response
 
@@ -28,8 +31,8 @@ Create a new role (owner only).
 ```json
 {
   "cmd": "role_create",
-  "name": "role_name",
-  "created": true
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "role_name"
 }
 ```
 
@@ -58,6 +61,7 @@ If the role already exists:
 - Requires `owner` role.
 - Role names are case-sensitive.
 - Role names cannot be the same as existing roles.
+- The role is created with a unique `id` that can be used for lookups and renames.
 - The role is created with no users assigned - use `user_roles_add` to assign it to users.
 - The role can be used in channel permissions immediately after creation.
 - Self-assignable roles can be assigned by users via `self_role_add` without owner intervention.
@@ -66,9 +70,9 @@ If the role already exists:
 
 - [role_update](role_update.md) - Update an existing role
 - [role_delete](role_delete.md) - Delete a role
-- [role_list](role_list.md) - List all roles
+- [roles_list](roles_list.md) - List all roles
 - [self_role_add](self_role_add.md) - Self-assign a role
 - [self_roles_list](self_roles_list.md) - List self-assignable roles
 - [user_roles_add](user_roles_add.md) - Add roles to a user
 
-See implementation: [`handlers/message.py`](../../handlers/message.py) (search for `case "role_create":`).
+See implementation: [`handlers/messages/role.py`](../../handlers/messages/role.py).

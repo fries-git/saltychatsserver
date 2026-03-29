@@ -226,6 +226,18 @@ def remove_role(user_id, role):
         return False
 
 
+def remove_role_from_all_users(role):
+    """Remove a role from all users that have it."""
+    init_db()
+    with _lock:
+        rows = fetchall("SELECT id, roles FROM users WHERE roles LIKE ?", (f'%"{role}"%',))
+        for row in rows:
+            user_roles = _json_loads(row.get("roles")) or []
+            if role in user_roles:
+                user_roles.remove(role)
+                execute("UPDATE users SET roles = ? WHERE id = ?", (_json_dumps(user_roles), row["id"]))
+
+
 def remove_user_roles(user_id, roles_to_remove):
     """Remove multiple roles from a user."""
     with _lock:

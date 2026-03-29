@@ -1,6 +1,6 @@
 # Command: role_update
 
-Update an existing role's properties (owner only).
+Update an existing role's properties. Requires `manage_roles` permission.
 
 ## Request
 
@@ -52,14 +52,18 @@ Update an existing role's properties (owner only).
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_roles permission required"}`
 - `{"cmd": "error", "val": "Role id or name is required"}`
 - `{"cmd": "error", "val": "Role not found"}`
 - `{"cmd": "error", "val": "Role 'owner' cannot be made self-assignable"}` (also for `admin`, `moderator`)
 
+## Permissions
+
+- Requires `manage_roles` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Roles can only be updated by users with the `manage_roles` permission.
 - Can use either `id` or `name` to identify the role.
 - **Roles can now be renamed** by providing a new `name` field.
 - Updates are applied to the role immediately.

@@ -1,6 +1,6 @@
 # Command: role_create
 
-Create a new role (owner only).
+Create a new role. Requires `manage_roles` permission.
 
 ## Request
 
@@ -51,14 +51,18 @@ If the role already exists:
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_roles permission required"}`
 - `{"cmd": "error", "val": "Role name is required"}`
 - `{"cmd": "error", "val": "Role already exists"}`
 - `{"cmd": "error", "val": "Role 'owner' cannot be made self-assignable"}` (also for `admin`, `moderator`)
 
+## Permissions
+
+- Requires `manage_roles` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Roles can only be created by users with the `manage_roles` permission.
 - Role names are case-sensitive.
 - Role names cannot be the same as existing roles.
 - The role is created with a unique `id` that can be used for lookups and renames.

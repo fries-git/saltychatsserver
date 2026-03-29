@@ -1,6 +1,6 @@
 # Command: webhook_update
 
-Update a webhook's name or avatar (owner only).
+Update a webhook's name or avatar. Requires `manage_server` permission.
 
 ## Request
 
@@ -42,16 +42,20 @@ At least one of `name` or `avatar` must be provided.
 ## Error Responses
 
 - `{"cmd": "error", "src": "webhook_update", "val": "Authentication required"}`
-- `{"cmd": "error", "src": "webhook_update", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "src": "webhook_update", "val": "Access denied: manage_server permission required"}`
 - `{"cmd": "error", "src": "webhook_update", "val": "Webhook ID is required"}`
 - `{"cmd": "error", "src": "webhook_update", "val": "Webhook not found"}`
 - `{"cmd": "error", "src": "webhook_update", "val": "Webhook name must be a non-empty string"}`
 - `{"cmd": "error", "src": "webhook_update", "val": "No updates provided"}`
 - `{"cmd": "error", "src": "webhook_update", "val": "Failed to update webhook"}`
 
+## Permissions
+
+- Requires `manage_server` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Webhooks can only be updated by users with the `manage_server` permission.
 - The `token` field is NOT included in the response for security.
 - You cannot change the channel a webhook belongs to - create a new webhook instead.
 - To change the token, use `webhook_regenerate`.

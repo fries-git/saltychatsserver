@@ -1,6 +1,6 @@
 # Command: channel_delete
 
-Delete a channel from the server (owner only).
+Delete a channel from the server. Requires `manage_channels` permission.
 
 ## Request
 
@@ -30,13 +30,17 @@ Delete a channel from the server (owner only).
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_channels permission required"}`
 - `{"cmd": "error", "val": "Channel name is required"}`
 - `{"cmd": "error", "val": "Channel not found"}`
 
+## Permissions
+
+- Requires `manage_channels` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Channels can only be deleted by users with the `manage_channels` permission.
 - **Permanent action** - Deleted channels cannot be recovered.
 - Deleting a text channel permanently removes all messages stored in it.
 - Deleting a voice channel removes it from the voice channel list.

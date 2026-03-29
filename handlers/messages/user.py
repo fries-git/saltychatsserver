@@ -1,5 +1,5 @@
 from db import users
-from handlers.messages.helpers import _error, _require_user_id, _require_user_roles
+from handlers.messages.helpers import _error, _require_user_id, _require_permission
 from handlers.websocket_utils import broadcast_to_all
 
 ALLOWED_UPDATE_FIELDS = {"username", "nickname"}
@@ -10,7 +10,7 @@ async def handle_user_update(ws, message, match_cmd, server_data):
     if error:
         return error
 
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_users", match_cmd)
     if error:
         return error
 

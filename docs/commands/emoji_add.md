@@ -1,6 +1,6 @@
 # Command: emoji_add
 
-Add a custom server emoji (owner only).
+Add a custom server emoji. Requires `manage_server` permission.
 
 ## Request
 
@@ -32,13 +32,17 @@ Add a custom server emoji (owner only).
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_server permission required"}`
 - `{"cmd": "error", "val": "Error adding emoji"}`
 - `{"cmd": "error", "val": "Invalid emoji_add command scheme: ..."}` - When validation fails
 
+## Permissions
+
+- Requires `manage_server` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Emojis can only be added by users with the `manage_server` permission.
 - Emoji names must be unique.
 - Image type must be one of server-allowed file types.
 

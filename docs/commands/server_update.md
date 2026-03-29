@@ -1,6 +1,6 @@
 # Command: server_update
 
-Update the server's display information (owner only).
+Update the server's display information. Requires `manage_server` permission.
 
 ## Request
 
@@ -39,16 +39,20 @@ Broadcast to all connected clients:
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_server permission required"}`
 - `{"cmd": "error", "val": "Server data not available"}`
 - `{"cmd": "error", "val": "Name must be a string or null"}`
 - `{"cmd": "error", "val": "Icon must be a string or null"}`
 - `{"cmd": "error", "val": "Banner must be a string or null"}`
 - `{"cmd": "error", "val": "No updates provided"}`
 
+## Permissions
+
+- Requires `manage_server` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Server settings can only be updated by users with the `manage_server` permission.
 - All fields are optional, but at least one must be provided.
 - Passing `null` for a field clears/removes that value.
 - Changes are broadcast to all connected clients immediately.

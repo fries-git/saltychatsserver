@@ -1,6 +1,6 @@
 # Command: rate_limit_reset
 
-Reset a user's rate limiting (owner only).
+Reset a user's rate limiting. Requires `manage_server` permission.
 
 ## Request
 
@@ -30,13 +30,17 @@ Reset a user's rate limiting (owner only).
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_server permission required"}`
 - `{"cmd": "error", "val": "User parameter is required"}`
 - `{"cmd": "error", "val": "Rate limiter not available or disabled"}`
 
+## Permissions
+
+- Requires `manage_server` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Rate limits can only be reset by users with the `manage_server` permission.
 - Can accept username (resolved to user ID) or direct user ID.
 - Clears all rate limiting counters for the specified user.
 - Resets any active cooldown or rate limit status.

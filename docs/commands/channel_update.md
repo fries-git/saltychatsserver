@@ -1,6 +1,6 @@
 # Command: channel_update
 
-Update an existing channel's properties (owner only).
+Update an existing channel's properties. Requires `manage_channels` permission.
 
 ## Request
 
@@ -67,7 +67,7 @@ Update an existing channel's properties (owner only).
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_channels permission required"}`
 - `{"cmd": "error", "val": "current_name is required"}`
 - `{"cmd": "error", "val": "updates object is required"}`
 - `{"cmd": "error", "val": "Channel not found"}`
@@ -75,9 +75,13 @@ Update an existing channel's properties (owner only).
 - `{"cmd": "error", "val": "Channel with new name already exists"}`
 - `{"cmd": "error", "val": "Failed to update channel"}`
 
+## Permissions
+
+- Requires `manage_channels` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Channels can only be updated by users with the `manage_channels` permission.
 - Channel names are case-sensitive.
 - When renaming a channel, the channel file is also renamed for text/voice channels.
 - `current_name` is used to find the channel in case multiple updates are being applied.

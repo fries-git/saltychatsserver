@@ -170,6 +170,16 @@ All commands documented individually in `docs/commands/`.
 |---------|-------------|
 | [`embeds_list`](commands/embeds_list.md) | List embeds |
 
+### Polls
+
+| Command | Description |
+|---------|-------------|
+| [`poll_create`](commands/poll_create.md) | Create a poll |
+| [`poll_vote`](commands/poll_vote.md) | Vote on a poll |
+| [`poll_end`](commands/poll_end.md) | End a poll |
+| [`poll_results`](commands/poll_results.md) | Get poll results |
+| [`poll_get`](commands/poll_get.md) | Get poll details |
+
 ---
 
 ## Data Structures
@@ -181,7 +191,9 @@ All commands documented individually in `docs/commands/`.
 | [Message](data/messages.md) | Message structure |
 | [Role](data/roles.md) | Role definition |
 | [Emoji](data/emojis.md) | Custom emoji |
-| [Permissions](data/permissions.md) | Permission system |
+| [Permissions](permissions.md) | Permission system |
+| [Embeds](embeds.md) | Embed types and structure |
+| [Polls](polls.md) | Polls system |
 
 ---
 
@@ -210,4 +222,4 @@ Users can use these slash commands:
 
 ---
 
-**Last Updated:** 2026-03-28
+**Last Updated:** 2026-03-29

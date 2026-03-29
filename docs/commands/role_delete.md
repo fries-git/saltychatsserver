@@ -1,6 +1,6 @@
 # Command: role_delete
 
-Delete a role from the server (owner only).
+Delete a role from the server. Requires `manage_roles` permission.
 
 ## Request
 
@@ -51,15 +51,19 @@ Or by name:
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_roles permission required"}`
 - `{"cmd": "error", "val": "Role id or name is required"}`
 - `{"cmd": "error", "val": "Role not found"}`
 - `{"cmd": "error", "val": "Cannot delete system roles"}`
 - `{"cmd": "error", "val": "Role is used in channel 'channel_name' permissions"}` - Role must be removed from all channel permissions first
 
+## Permissions
+
+- Requires `manage_roles` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Roles can only be deleted by users with the `manage_roles` permission.
 - Cannot delete system roles: `owner`, `admin`, `user`.
 - **The role is automatically removed from all users** that have it.
 - The role must be removed from all channel permissions before deletion.

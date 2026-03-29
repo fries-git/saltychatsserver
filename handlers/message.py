@@ -1,4 +1,4 @@
-from db import channels, users, roles, serverEmojis, threads
+from db import channels, users, roles, serverEmojis, threads, permissions, polls
 import time, uuid, sys, os, asyncio, json, re
 from handlers.messages.webhook import handle_webhook_create, handle_webhook_get, handle_webhook_list, handle_webhook_delete, handle_webhook_update, handle_webhook_regenerate
 from handlers.messages.emoji import handle_emoji_add, handle_emoji_delete, handle_emoji_get_all, handle_emoji_update, handle_emoji_get_filename, handle_emoji_get_id
@@ -12,6 +12,7 @@ from handlers.messages.status import handle_status_set, handle_status_get
 from handlers.messages.reaction import handle_react_add, handle_react_remove
 from handlers.messages.user import handle_user_update
 from handlers.messages.server import handle_server_update, handle_server_info
+from handlers.messages.poll import handle_poll_create, handle_poll_vote, handle_poll_end, handle_poll_results, handle_poll_get
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logger import Logger
 from config_store import get_config_value
@@ -1924,5 +1925,15 @@ async def handle(ws, message, server_data: dict):
                 embeds = msg_obj.get("embeds", [])
 
                 return {"cmd": "embeds_list", "id": message_id, "embeds": embeds}
+            case "poll_create":
+                return await handle_poll_create(ws, message, match_cmd, server_data)
+            case "poll_vote":
+                return await handle_poll_vote(ws, message, match_cmd, server_data)
+            case "poll_end":
+                return await handle_poll_end(ws, message, match_cmd, server_data)
+            case "poll_results":
+                return handle_poll_results(ws, message, match_cmd)
+            case "poll_get":
+                return handle_poll_get(ws, message, match_cmd)
             case _:
                 return _error(f"Unknown command: {message.get('cmd')}", match_cmd)

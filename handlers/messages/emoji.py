@@ -1,14 +1,14 @@
 from db import serverEmojis
 from pydantic import ValidationError
 from schemas.server_emoji_schema import Emoji_add, Emoji_delete, Emoji_get_all, Emoji_update, Emoji_get_filename, Emoji_get_id
-from handlers.messages.helpers import _error, _require_user_id, _require_user_roles
+from handlers.messages.helpers import _error, _require_user_id, _require_permission
 
 
 def handle_emoji_add(ws, message, match_cmd):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_server", match_cmd)
     if error:
         return error
 
@@ -27,7 +27,7 @@ def handle_emoji_delete(ws, message, match_cmd):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_server", match_cmd)
     if error:
         return error
 
@@ -56,7 +56,7 @@ def handle_emoji_update(ws, message, match_cmd):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_server", match_cmd)
     if error:
         return error
 

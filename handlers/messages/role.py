@@ -1,5 +1,5 @@
-from db import roles, users, channels
-from handlers.messages.helpers import _error, _require_user_id, _require_user_roles
+from db import roles, users, channels, permissions
+from handlers.messages.helpers import _error, _require_user_id, _require_user_roles, _require_permission, _require_can_manage_role
 from handlers.websocket_utils import broadcast_to_all
 
 
@@ -7,7 +7,7 @@ async def handle_role_create(ws, message, match_cmd, server_data):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_roles", match_cmd)
     if error:
         return error
 
@@ -55,7 +55,7 @@ async def handle_role_reorder(ws, message, match_cmd, server_data):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_roles", match_cmd)
     if error:
         return error
 
@@ -83,13 +83,17 @@ async def handle_role_update(ws, message, match_cmd, server_data):
         return error
     if not server_data:
         return _error("Server data not available", match_cmd)
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_roles", match_cmd)
     if error:
         return error
-
+    
     role_id_or_name = message.get("id") or message.get("name")
     if not role_id_or_name:
         return _error("Role id or name is required", match_cmd)
+    
+    error = _require_can_manage_role(user_id, role_id_or_name, match_cmd)
+    if error:
+        return error
 
     if not roles.role_exists(role_id_or_name):
         return _error("Role not found", match_cmd)
@@ -144,13 +148,17 @@ async def handle_role_set(ws, message, match_cmd, server_data):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_roles", match_cmd)
     if error:
         return error
-
+    
     role_id_or_name = message.get("id") or message.get("name")
     if not role_id_or_name:
         return _error("Role id or name is required", match_cmd)
+    
+    error = _require_can_manage_role(user_id, role_id_or_name, match_cmd)
+    if error:
+        return error
 
     role_data = message.get("data")
     if not role_data or not isinstance(role_data, dict):
@@ -182,20 +190,24 @@ async def handle_role_delete(ws, message, match_cmd, server_data):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_roles", match_cmd)
     if error:
         return error
-
+    
     role_id_or_name = message.get("id") or message.get("name")
     if not role_id_or_name:
         return _error("Role id or name is required", match_cmd)
-
+    
     role = roles.get_role(role_id_or_name)
     if not role:
         return _error("Role not found", match_cmd)
-
+    
+    error = _require_can_manage_role(user_id, role.get("name"), match_cmd)
+    if error:
+        return error
+    
     role_name = role.get("name")
-
+    
     if role_name in ["owner", "admin", "user"]:
         return _error("Cannot delete system roles", match_cmd)
 
@@ -236,13 +248,17 @@ def handle_role_permissions_set(ws, message, match_cmd):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_roles", match_cmd)
     if error:
         return error
-
+    
     role_id_or_name = message.get("id") or message.get("name")
     if not role_id_or_name:
         return _error("Role id or name is required", match_cmd)
+    
+    error = _require_can_manage_role(user_id, role_id_or_name, match_cmd)
+    if error:
+        return error
 
     if not roles.role_exists(role_id_or_name):
         return _error("Role not found", match_cmd)

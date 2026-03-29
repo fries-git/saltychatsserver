@@ -1,4 +1,4 @@
-from db import users
+from db import users, permissions as perms
 from handlers.websocket_utils import _get_ws_attr
 
 
@@ -24,3 +24,16 @@ def _require_user_roles(user_id, *, requiredRoles=[], forbiddenRoles=[], missing
     if not user_roles:
         return None, _error(missing_roles_message, None)
     return user_roles, None
+
+
+def _require_permission(user_id, permission, match_cmd, channel_name=None):
+    if not perms.has_permission(user_id, permission, channel_name):
+        return _error(f"Access denied: '{permission}' permission required", match_cmd)
+    return None
+
+
+def _require_can_manage_role(actor_id, target_role, match_cmd):
+    can_manage, error_msg = perms.can_manage_role(actor_id, target_role)
+    if not can_manage:
+        return _error(error_msg, match_cmd)
+    return None

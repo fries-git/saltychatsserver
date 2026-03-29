@@ -1,6 +1,6 @@
 # Command: role_reorder
 
-Reorder all roles by providing a new order (owner only).
+Reorder all roles by providing a new order. Requires `manage_roles` permission.
 
 ## Request
 
@@ -45,14 +45,18 @@ Returns to the requester:
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_roles permission required"}`
 - `{"cmd": "error", "val": "Server data not available"}`
 - `{"cmd": "error", "val": "Roles array is required"}`
 - `{"cmd": "error", "val": "Failed to reorder roles"}`
 
+## Permissions
+
+- Requires `manage_roles` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Roles can only be reordered by users with the `manage_roles` permission.
 - All existing roles must be included in the reorder array.
 - You can use either role names or role IDs in the array.
 - The order determines how roles are displayed and their priority.

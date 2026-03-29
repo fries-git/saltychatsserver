@@ -1,6 +1,6 @@
 # Command: emoji_delete
 
-Delete a custom server emoji by ID (owner only).
+Delete a custom server emoji by ID. Requires `manage_server` permission.
 
 ## Request
 
@@ -30,12 +30,16 @@ Delete a custom server emoji by ID (owner only).
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_server permission required"}`
 - `{"cmd": "error", "val": "Invalid emoji_delete command scheme: ..."}` - When validation fails
+
+## Permissions
+
+- Requires `manage_server` permission.
 
 ## Notes
 
-- Requires `owner` role.
+- Emojis can only be deleted by users with the `manage_server` permission.
 - `deleted` is `false` if the ID does not exist.
 
 ## See Also

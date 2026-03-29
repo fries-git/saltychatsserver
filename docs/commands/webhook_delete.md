@@ -1,6 +1,6 @@
 # Command: webhook_delete
 
-Delete a webhook (owner only).
+Delete a webhook. Requires `manage_server` permission.
 
 ## Request
 
@@ -30,14 +30,18 @@ Delete a webhook (owner only).
 ## Error Responses
 
 - `{"cmd": "error", "src": "webhook_delete", "val": "Authentication required"}`
-- `{"cmd": "error", "src": "webhook_delete", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "src": "webhook_delete", "val": "Access denied: manage_server permission required"}`
 - `{"cmd": "error", "src": "webhook_delete", "val": "Webhook ID is required"}`
 - `{"cmd": "error", "src": "webhook_delete", "val": "Webhook not found"}`
 - `{"cmd": "error", "src": "webhook_delete", "val": "Failed to delete webhook"}`
 
+## Permissions
+
+- Requires `manage_server` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Webhooks can only be deleted by users with the `manage_server` permission.
 - Deletion is permanent - the webhook token will no longer work.
 - Any external services using this webhook will receive 401 errors after deletion.
 

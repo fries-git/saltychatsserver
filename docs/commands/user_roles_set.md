@@ -1,6 +1,6 @@
 # Command: user_roles_set
 
-Set the exact roles for a user (owner only).
+Set the exact roles for a user. Requires `manage_users` permission.
 
 ## Request
 
@@ -33,16 +33,20 @@ Set the exact roles for a user (owner only).
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_users permission required"}`
 - `{"cmd": "error", "val": "User parameter is required"}`
 - `{"cmd": "error", "val": "Roles list is required"}`
 - `{"cmd": "error", "val": "User not found"}`
 - `{"cmd": "error", "val": "Role 'role_name' does not exist"}`
 - `{"cmd": "error", "val": "Cannot remove all roles from a user"}`
 
+## Permissions
+
+- Requires `manage_users` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- User roles can only be set by users with the `manage_users` permission.
 - Completely replaces the user's existing roles with the provided list.
 - At least one role must be provided.
 - All roles must exist before being assigned to a user.

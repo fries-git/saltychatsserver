@@ -78,6 +78,8 @@ def _load_channels_index() -> List[dict]:
                     channel_obj["name"] = ch["name"]
                 if ch.get("description"):
                     channel_obj["description"] = ch["description"]
+                if ch.get("display_name"):
+                    channel_obj["display_name"] = ch["display_name"]
                 if ch.get("size"):
                     channel_obj["size"] = ch["size"]
                 _channels_cache.append(channel_obj)
@@ -85,8 +87,8 @@ def _load_channels_index() -> List[dict]:
             _channels_cache = copy.deepcopy(DEFAULT_CHANNELS)
             for i, ch in enumerate(_channels_cache):
                 execute(
-                    "INSERT OR REPLACE INTO channels (name, type, description, permissions, position, size) VALUES (?, ?, ?, ?, ?, ?)",
-                    (ch.get("name"), ch.get("type", "text"), ch.get("description"), _json_dumps(ch.get("permissions", {})), i, ch.get("size"))
+                    "INSERT OR REPLACE INTO channels (name, type, description, display_name, permissions, position, size) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (ch.get("name"), ch.get("type", "text"), ch.get("description"), ch.get("display_name"), _json_dumps(ch.get("permissions", {})), i, ch.get("size"))
                 )
     except Exception:
         _channels_cache = copy.deepcopy(DEFAULT_CHANNELS)
@@ -101,8 +103,8 @@ def _save_channels_index(channels: List[dict]) -> None:
     
     for i, ch in enumerate(channels):
         execute(
-            "INSERT OR REPLACE INTO channels (name, type, description, permissions, position, size) VALUES (?, ?, ?, ?, ?, ?)",
-            (ch.get("name"), ch.get("type", "text"), ch.get("description"), _json_dumps(ch.get("permissions", {})), i, ch.get("size"))
+            "INSERT OR REPLACE INTO channels (name, type, description, display_name, permissions, position, size) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (ch.get("name"), ch.get("type", "text"), ch.get("description"), ch.get("display_name"), _json_dumps(ch.get("permissions", {})), i, ch.get("size"))
         )
     
     _channels_cache = channels
@@ -453,34 +455,34 @@ def get_channels() -> List[dict]:
     return _get_channels()
 
 
-def create_channel(channel_name: str, channel_type: str = "text", description: str = None, 
-                   wallpaper: str = None, permissions: dict = None, size: dict = None) -> dict:
+def create_channel(channel_name: str, channel_type: str = "text", description: str = None,
+                   display_name: str = None, permissions: dict = None, size: dict = None) -> dict:
     """Create a new channel."""
     init_db()
-    
+
     if permissions is None:
         permissions = DEFAULT_PERMISSIONS.copy()
-    
+
     channel = {
         "name": channel_name,
         "type": channel_type,
         "description": description,
+        "display_name": display_name,
         "permissions": permissions,
-        "wallpaper": wallpaper,
         "size": size
     }
-    
+
     channels_list = _get_channels()
     position = len(channels_list)
-    
+
     execute(
-        "INSERT OR REPLACE INTO channels (name, type, description, permissions, position) VALUES (?, ?, ?, ?, ?)",
-        (channel_name, channel_type, description, _json_dumps(permissions), position)
+        "INSERT OR REPLACE INTO channels (name, type, description, display_name, permissions, position, size) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (channel_name, channel_type, description, display_name, _json_dumps(permissions), position, size)
     )
-    
+
     channels_list.append(channel)
     _invalidate_permission_cache()
-    
+
     return channel
 
 
@@ -755,17 +757,21 @@ def channel_exists(channel_name: str) -> bool:
 def update_channel(channel_name: str, updates: dict) -> bool:
     """Update channel properties."""
     init_db()
-    
+
     channel = get_channel(channel_name)
     if not channel:
         return False
-    
+
     if "description" in updates:
         execute("UPDATE channels SET description = ? WHERE name = ?", (updates["description"], channel_name))
+    if "display_name" in updates:
+        execute("UPDATE channels SET display_name = ? WHERE name = ?", (updates["display_name"], channel_name))
     if "permissions" in updates:
         execute("UPDATE channels SET permissions = ? WHERE name = ?", (_json_dumps(updates["permissions"]), channel_name))
     if "type" in updates:
         execute("UPDATE channels SET type = ? WHERE name = ?", (updates["type"], channel_name))
-    
+    if "name" in updates and updates["name"] != channel_name:
+        execute("UPDATE channels SET name = ? WHERE name = ?", (updates["name"], channel_name))
+
     _invalidate_permission_cache()
     return True

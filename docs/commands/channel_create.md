@@ -1,6 +1,6 @@
 # Command: channel_create
 
-Create a new channel (owner only).
+Create a new channel. Requires `manage_channels` permission.
 
 ## Request
 
@@ -79,16 +79,20 @@ Create a new channel (owner only).
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_channels permission required"}`
 - `{"cmd": "error", "val": "Channel name is required"}`
 - `{"cmd": "error", "val": "Channel type is required (text, voice, or separator)"}`
 - `{"cmd": "error", "val": "Invalid channel type, must be text, voice, or separator"}`
 - `{"cmd": "error", "val": "Channel already exists"}`
 - `{"cmd": "error", "val": "Failed to create channel"}`
 
+## Permissions
+
+- Requires `manage_channels` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Channels can only be created by users with the `manage_channels` permission.
 - Channel names are case-sensitive.
 - For text channels, an empty message file is automatically created.
 - Voice channels support WebRTC peer-to-peer audio connections.

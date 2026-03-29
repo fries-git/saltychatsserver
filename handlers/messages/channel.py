@@ -1,5 +1,5 @@
 from db import channels, users
-from handlers.messages.helpers import _error, _require_user_id, _require_user_roles
+from handlers.messages.helpers import _error, _require_user_id, _require_permission
 
 
 def handle_channels_get(ws, message, match_cmd, server_data):
@@ -36,7 +36,7 @@ def handle_channel_create(ws, message, match_cmd, server_data):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_channels", match_cmd)
     if error:
         return error
 
@@ -57,9 +57,9 @@ def handle_channel_create(ws, message, match_cmd, server_data):
         channel_name,
         channel_type,
         description=message.get("description"),
-        wallpaper=message.get("wallpaper"),
+        display_name=message.get("display_name"),
         permissions=message.get("permissions"),
-        size=message.get("size") if channel_type == "separator" else None
+        size=(message.get("size") or None) if channel_type == "separator" else None
     )
 
     if created:
@@ -77,7 +77,7 @@ def handle_channel_update(ws, message, match_cmd, server_data):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_channels", match_cmd)
     if error:
         return error
 
@@ -116,7 +116,7 @@ def handle_channel_move(ws, message, match_cmd, server_data):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_channels", match_cmd)
     if error:
         return error
 
@@ -146,7 +146,7 @@ def handle_channel_delete(ws, message, match_cmd, server_data):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_channels", match_cmd)
     if error:
         return error
 

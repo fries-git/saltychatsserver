@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS channels (
     name TEXT,
     type TEXT DEFAULT 'text',
     description TEXT,
+    display_name TEXT,
     permissions TEXT,
     position INTEGER DEFAULT 0,
     size INTEGER
@@ -129,6 +130,38 @@ CREATE TABLE IF NOT EXISTS roles (
 );
 
 CREATE INDEX IF NOT EXISTS idx_roles_name ON roles(name);
+
+-- Polls table
+CREATE TABLE IF NOT EXISTS polls (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    channel TEXT,
+    thread_id TEXT,
+    question TEXT NOT NULL,
+    options TEXT NOT NULL,
+    allow_multiselect INTEGER DEFAULT 0,
+    expires_at REAL,
+    created_by TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    ended INTEGER DEFAULT 0,
+    ended_at REAL,
+    UNIQUE(message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_polls_message ON polls(message_id);
+
+-- Poll votes table
+    CREATE TABLE IF NOT EXISTS poll_votes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    poll_id TEXT NOT NULL,
+    option_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    voted_at REAL NOT NULL,
+    UNIQUE(poll_id, option_id, user_id),
+    FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes(poll_id);
 """
 
 
@@ -169,15 +202,97 @@ def init_db(db_path: Optional[str] = None) -> None:
         _initialized = True
 
 
+def _insert_default_roles(conn, uuid, json):
+    """Insert default roles into the database."""
+    OWNER_PERMS = ["administrator"]
+    ADMIN_PERMS = ["manage_roles", "manage_channels", "manage_users", "manage_server",
+                  "manage_messages", "manage_threads", "mention_everyone", "use_slash_commands"]
+    MODERATOR_PERMS = ["manage_messages", "manage_threads", "use_slash_commands"]
+    USER_PERMS = ["use_slash_commands"]
+
+    default_roles = [
+        (str(uuid.uuid4()), "owner", "Server owner with ultimate permissions.", "#d5beff", 1, json.dumps(OWNER_PERMS), 0, None, 0),
+        (str(uuid.uuid4()), "admin", "Administrator role with full permissions.", "#FF0000", 1, json.dumps(ADMIN_PERMS), 0, None, 1),
+        (str(uuid.uuid4()), "moderator", "Moderator role with elevated permissions.", "#FFFF00", 1, json.dumps(MODERATOR_PERMS), 0, None, 2),
+        (str(uuid.uuid4()), "user", "Regular user role with standard permissions.", "#FFFFFF", 0, json.dumps(USER_PERMS), 0, None, 3),
+    ]
+
+    for role in default_roles:
+        conn.execute(
+            "INSERT INTO roles (id, name, description, color, hoisted, permissions, self_assignable, category, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            role
+        )
+
+
 def _run_schema_migrations(conn):
     """Run schema migrations for existing databases."""
     import uuid
-    
+    import json
+
+    # Create roles table if it doesn't exist
+    try:
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='roles'")
+        roles_table_exists = cursor.fetchone() is not None
+        
+        if not roles_table_exists:
+            conn.execute("""
+                CREATE TABLE roles (
+                    id TEXT PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL,
+                    description TEXT,
+                    color TEXT,
+                    hoisted INTEGER DEFAULT 0,
+                    permissions TEXT,
+                    self_assignable INTEGER DEFAULT 0,
+                    category TEXT,
+                    position INTEGER DEFAULT 0
+                )
+            """)
+        
+        # Check if roles table is empty - if so, try to migrate from roles.json
+        cursor = conn.execute("SELECT COUNT(*) FROM roles")
+        roles_count = cursor.fetchone()[0]
+        
+        if roles_count == 0:
+            roles_json_path = os.path.join(os.path.dirname(_DB_PATH), "roles.json")
+            if os.path.exists(roles_json_path):
+                try:
+                    with open(roles_json_path, 'r', encoding='utf-8') as f:
+                        roles_data = json.load(f)
+                    
+                    if roles_data:
+                        print("[Migrating roles from roles.json]")
+                        position = 0
+                        for role_name, role_data in roles_data.items():
+                            role_id = str(uuid.uuid4())
+                            conn.execute(
+                                "INSERT INTO roles (id, name, description, color, hoisted, permissions, self_assignable, category, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                (role_id, 
+                                 role_name, 
+                                 role_data.get("description"), 
+                                 role_data.get("color"), 
+                                 1 if role_data.get("hoisted") else 0, 
+                                 json.dumps(role_data.get("permissions", {})), 
+                                 1 if role_data.get("self_assignable") else 0, 
+                                 role_data.get("category"),
+                                 position)
+                            )
+                            position += 1
+                        print(f"[Migrated {position} roles from roles.json]")
+                except Exception as e:
+                    print(f"Error migrating roles.json: {e}")
+                    if roles_count == 0 and not roles_table_exists:
+                        _insert_default_roles(conn, uuid, json)
+            elif roles_count == 0 and not roles_table_exists:
+                _insert_default_roles(conn, uuid, json)
+    except Exception as e:
+        print(f"Migration error (roles table creation): {e}")
+
     # Add position column to roles if missing
     try:
         cursor = conn.execute("PRAGMA table_info(roles)")
         columns = [row[1] for row in cursor.fetchall()]
-        if "position" not in columns:
+        if columns and "position" not in columns:
             conn.execute("ALTER TABLE roles ADD COLUMN position INTEGER DEFAULT 0")
     except Exception:
         pass
@@ -185,10 +300,11 @@ def _run_schema_migrations(conn):
     try:
         cursor = conn.execute("PRAGMA table_info(roles)")
         columns = [row[1] for row in cursor.fetchall()]
-        if "id" not in columns:
+        # Only run this migration if roles table exists and doesn't have id column
+        if columns and "id" not in columns:
             cursor = conn.execute("SELECT name FROM roles")
             existing_roles = [row[0] for row in cursor.fetchall()]
-            
+
             conn.execute("""
                 CREATE TABLE roles_new (
                     id TEXT PRIMARY KEY,
@@ -202,7 +318,7 @@ def _run_schema_migrations(conn):
                     position INTEGER DEFAULT 0
                 )
             """)
-            
+
             for role_name in existing_roles:
                 role_id = str(uuid.uuid4())
                 conn.execute("""
@@ -210,9 +326,9 @@ def _run_schema_migrations(conn):
                     SELECT ?, name, description, color, hoisted, permissions, self_assignable, category, position
                     FROM roles WHERE name = ?
                 """, (role_id, role_name))
-            
-        conn.execute("DROP TABLE roles")
-        conn.execute("ALTER TABLE roles_new RENAME TO roles")
+
+            conn.execute("DROP TABLE roles")
+            conn.execute("ALTER TABLE roles_new RENAME TO roles")
     except Exception:
         pass
 
@@ -221,6 +337,14 @@ def _run_schema_migrations(conn):
         columns = [row[1] for row in cursor.fetchall()]
         if "interaction" not in columns:
             conn.execute("ALTER TABLE messages ADD COLUMN interaction TEXT")
+    except Exception:
+        pass
+
+    try:
+        cursor = conn.execute("PRAGMA table_info(channels)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "display_name" not in columns:
+            conn.execute("ALTER TABLE channels ADD COLUMN display_name TEXT")
     except Exception:
         pass
 
@@ -267,22 +391,47 @@ def _handle_first_time_setup():
 def _create_default_data():
     """Create default channels and roles for a fresh installation."""
     import uuid
+    import json
     conn = get_connection()
 
-    # Default roles
+    OWNER_PERMS = ["administrator"]
+    ADMIN_PERMS = [
+        "administrator",
+        "manage_roles", "manage_channels", "manage_users", "manage_server",
+        "manage_messages", "manage_threads", "manage_nicknames",
+        "kick_members", "ban_members",
+        "create_invite", "manage_invites",
+        "mention_everyone", "use_slash_commands",
+        "mute_members", "deafen_members", "move_members",
+        "connect", "speak", "stream",
+    ]
+    MODERATOR_PERMS = [
+        "manage_messages", "manage_threads",
+        "kick_members", "manage_nicknames",
+        "mute_members", "deafen_members", "move_members",
+        "create_invite",
+        "use_slash_commands",
+    ]
+    USER_PERMS = [
+        "send_messages", "read_message_history",
+        "add_reactions", "attach_files", "embed_links", "external_emojis",
+        "connect", "speak", "stream", "use_voice_activity",
+        "change_nickname", "create_invite", "use_slash_commands",
+    ]
+
     default_roles = {
-        "owner": {"description": "Server owner with ultimate permissions.", "color": "#d5beff", "hoisted": True},
-        "admin": {"description": "Administrator role with full permissions.", "color": "#FF0000", "hoisted": True},
-        "moderator": {"description": "Moderator role with elevated permissions.", "color": "#FFFF00", "hoisted": True},
-        "user": {"description": "Regular user role with standard permissions.", "color": "#FFFFFF", "hoisted": False},
+        "owner": {"description": "Server owner with ultimate permissions.", "color": "#d5beff", "hoisted": True, "permissions": OWNER_PERMS, "position": 0},
+        "admin": {"description": "Administrator role with full permissions.", "color": "#FF0000", "hoisted": True, "permissions": ADMIN_PERMS, "position": 1},
+        "moderator": {"description": "Moderator role with elevated permissions.", "color": "#FFFF00", "hoisted": True, "permissions": MODERATOR_PERMS, "position": 2},
+        "user": {"description": "Regular user role with standard permissions.", "color": "#FFFFFF", "hoisted": False, "permissions": USER_PERMS, "position": 3},
     }
 
     for role_name, role_data in default_roles.items():
         role_id = str(uuid.uuid4())
         conn.execute(
-            "INSERT OR IGNORE INTO roles (id, name, description, color, hoisted, permissions, self_assignable, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO roles (id, name, description, color, hoisted, permissions, self_assignable, category, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (role_id, role_name, role_data.get("description"), role_data.get("color"),
-            1 if role_data.get("hoisted") else 0, "{}", 0, None)
+            1 if role_data.get("hoisted") else 0, json.dumps(role_data.get("permissions", [])), 0, None, role_data.get("position", 0))
         )
     
     # Default channels

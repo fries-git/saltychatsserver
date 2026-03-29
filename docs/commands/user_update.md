@@ -1,6 +1,6 @@
 # Command: user_update
 
-Update a user's profile information (owner only).
+Update a user's profile information. Requires `manage_users` permission.
 
 ## Request
 
@@ -50,7 +50,7 @@ Returns to the requester:
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_users permission required"}`
 - `{"cmd": "error", "val": "User parameter is required"}`
 - `{"cmd": "error", "val": "User not found"}`
 - `{"cmd": "error", "val": "Updates must be an object"}`
@@ -58,9 +58,13 @@ Returns to the requester:
 - `{"cmd": "error", "val": "Username must be a non-empty string"}`
 - `{"cmd": "error", "val": "Nickname must be a string or null"}`
 
+## Permissions
+
+- Requires `manage_users` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- User profiles can only be updated by users with the `manage_users` permission.
 - Only `username` and `nickname` fields can be updated.
 - Username changes take effect immediately across all systems.
 - Setting `nickname` to `null` removes the nickname.

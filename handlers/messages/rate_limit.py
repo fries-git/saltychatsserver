@@ -1,5 +1,5 @@
 from db import users
-from handlers.messages.helpers import _error, _require_user_id, _require_user_roles
+from handlers.messages.helpers import _error, _require_user_id, _require_permission
 
 
 def handle_rate_limit_status(ws, message, match_cmd, server_data):
@@ -9,7 +9,7 @@ def handle_rate_limit_status(ws, message, match_cmd, server_data):
 
     target_user = message.get("user", user_id)
     target_id = users.get_id_by_username(target_user) or target_user
-    user_roles, _ = _require_user_roles(user_id)
+    user_roles = users.get_user_roles(user_id)
 
     if target_id != user_id and (not user_roles or "owner" not in user_roles):
         return _error("Access denied: can only check your own rate limit status", match_cmd)
@@ -26,7 +26,7 @@ def handle_rate_limit_reset(ws, message, match_cmd, server_data):
     user_id, error = _require_user_id(ws)
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_server", match_cmd)
     if error:
         return error
 

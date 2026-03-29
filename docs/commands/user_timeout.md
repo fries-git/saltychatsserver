@@ -1,6 +1,6 @@
 # Command: user_timeout
 
-Set a rate limit timeout for a user (owner only).
+Set a rate limit timeout for a user. Requires `manage_users` permission.
 
 ## Request
 
@@ -42,13 +42,17 @@ If the target user is currently connected, they will also receive:
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_users permission required"}`
 - `{"cmd": "error", "val": "Timeout must be provided"}`
 - `{"cmd": "error", "val": "Timeout must be a positive integer"}`
 
+## Permissions
+
+- Requires `manage_users` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Users can only be timed out by users with the `manage_users` permission.
 - The timeout is applied to the user's rate limiting system.
 - A timeout of `0` removes any existing timeout (unlimits the user).
 - The targeted user must be connected to receive the immediate notification.

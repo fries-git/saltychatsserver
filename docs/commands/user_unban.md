@@ -1,6 +1,6 @@
 # Command: user_unban
 
-Unban a user from the server (owner only).
+Unban a user from the server. Requires `manage_users` permission.
 
 ## Request
 
@@ -42,11 +42,15 @@ If the user wasn't banned or doesn't exist:
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_users permission required"}`
+
+## Permissions
+
+- Requires `manage_users` permission.
 
 ## Notes
 
-- Requires `owner` role.
+- Users can only be unbanned by users with the `manage_users` permission.
 - Unbanned users can authenticate with the server normally.
 - Unban is persistent (stored in users.json) across server restarts.
 - If the user was already not banned, `unbanned` will be false but no error occurs.

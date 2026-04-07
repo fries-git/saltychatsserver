@@ -8,7 +8,6 @@ from typing import Dict, Optional
 
 from . import roles
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logger import Logger
 from config_store import get_config_value
 

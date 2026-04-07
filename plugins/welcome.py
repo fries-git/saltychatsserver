@@ -3,8 +3,6 @@ import sys
 import json
 import time
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from db import channels, users
 from logger import Logger
 

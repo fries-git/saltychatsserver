@@ -1,7 +1,4 @@
 import os
-import sys
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db import users
 from handlers.websocket_utils import send_to_client, _get_ws_data, _get_ws_attr

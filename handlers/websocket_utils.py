@@ -1,8 +1,5 @@
 import asyncio
 import aiohttp
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logger import Logger
 
 _ws_data = {}

@@ -1,6 +1,10 @@
-from db import users
+import asyncio
+from db import users, roles
 from handlers.messages.helpers import _error, _require_user_id, _require_permission
-from handlers.websocket_utils import broadcast_to_all
+from handlers.websocket_utils import broadcast_to_all, _get_ws_attr
+from handlers.helpers.validation import (
+    require_user_roles as _require_user_roles,
+)
 
 ALLOWED_UPDATE_FIELDS = {"username", "nickname"}
 

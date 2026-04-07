@@ -1,28 +1,9 @@
 from db import channels, users, threads
-from handlers.websocket_utils import _get_ws_attr
-
-
-def _error(error_message, match_cmd):
-    if match_cmd:
-        return {"cmd": "error", "src": match_cmd, "val": error_message}
-    return {"cmd": "error", "val": error_message}
-
-
-def _require_user_id(ws, error_message: str = "User not authenticated"):
-    user_id = _get_ws_attr(ws, "user_id")
-    if not user_id:
-        return None, _error(error_message, None)
-    return user_id, None
-
-
-async def _require_user_roles(user_id, *, requiredRoles=[], forbiddenRoles=[], missing_roles_message="User roles not found"):
-    user_roles = users.get_user_roles(user_id)
-    for role in requiredRoles:
-        if not user_roles or role not in user_roles:
-            return None, _error(f"Access denied: '{role}' role required", None)
-    if not user_roles:
-        return None, _error(missing_roles_message, None)
-    return user_roles, None
+from handlers.helpers.validation import (
+    make_error as _error,
+    require_user_id as _require_user_id,
+    require_user_roles as _require_user_roles,
+)
 
 
 async def handle_react_add(ws, message, match_cmd, _get_channel_or_thread_context):

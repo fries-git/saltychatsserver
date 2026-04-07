@@ -1,15 +1,22 @@
 import copy
 import json
 import os
-import platform
-import subprocess
 import threading
 from typing import Dict, List, Optional, Tuple
 
 from . import users
 from .emoji_utils import is_valid_emoji
+from .shared import convert_messages_to_user_format
+from .storage_utils import (
+    find_line_number_grep,
+    count_lines_wc,
+    read_lines_range,
+    read_last_n_lines,
+    get_messages_around_from_file,
+    build_id_index,
+    atomic_write_json,
+)
 
-_IS_WINDOWS = platform.system() == "Windows"
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 channels_db_dir = os.path.join(_MODULE_DIR, "channels")
 channels_index = os.path.join(_MODULE_DIR, "channels.json")
@@ -84,12 +91,7 @@ def _load_channels_index() -> List[dict]:
 
 def _save_channels_index(channels: List[dict]) -> None:
     global _channels_cache, _channels_loaded
-    tmp = channels_index + ".tmp"
-    with open(tmp, 'w') as f:
-        json.dump(channels, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, channels_index)
+    atomic_write_json(channels_index, channels)
     _channels_cache = channels
     _channels_loaded = True
     _invalidate_permission_cache()
@@ -367,201 +369,9 @@ def get_channel_messages(channel_name, start, limit):
         return list(channel_data[begin:end])
 
 
-def _find_line_number_grep(file_path: str, search_pattern: str) -> Optional[int]:
-    """Use grep to find line number of a pattern. Returns 0-indexed line number."""
-    try:
-        result = subprocess.run(
-            ["grep", "-n", "-F", search_pattern, file_path],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0 and result.stdout:
-            first_match = result.stdout.split("\n")[0]
-            if ":" in first_match:
-                return int(first_match.split(":")[0]) - 1
-    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
-        pass
-    return None
-
-
-def _count_lines_wc(file_path: str) -> int:
-    """Use wc to count lines in a file."""
-    try:
-        result = subprocess.run(
-            ["wc", "-l", file_path],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0:
-            return int(result.stdout.split()[0])
-    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
-        pass
-    return 0
-
-
-def _read_lines_range(file_path: str, start: int, end: int) -> List[dict]:
-    """Read a range of lines from a file using sed/tail/head on Unix, or pure Python on Windows."""
-    messages = []
-    
-    if not _IS_WINDOWS:
-        try:
-            count = end - start
-            result = subprocess.run(
-                ["sed", "-n", f"{start+1},{end}p", file_path],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            if result.returncode == 0:
-                for line in result.stdout.strip().split("\n"):
-                    if line:
-                        try:
-                            messages.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            pass
-                return messages
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-    
-    with open(file_path, 'r', encoding='utf-8') as f:
-        for idx, line in enumerate(f):
-            if idx >= start and idx < end:
-                try:
-                    messages.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
-            elif idx >= end:
-                break
-    return messages
-
-
-def _read_last_n_lines(file_path: str, n: int) -> List[dict]:
-    """Read last n lines from a file using tail on Unix, or pure Python on Windows."""
-    messages = []
-    
-    if not _IS_WINDOWS and n <= 1000:
-        try:
-            result = subprocess.run(
-                ["tail", "-n", str(n), file_path],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if result.returncode == 0:
-                for line in result.stdout.strip().split("\n"):
-                    if line:
-                        try:
-                            messages.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            pass
-                return messages
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-    
-    with open(file_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()[-n:]
-        for line in lines:
-            if line.strip():
-                try:
-                    messages.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
-    return messages
-
-
 def get_channel_messages_around(channel_name: str, message_id: str, above: int = 50, below: int = 50) -> Tuple[Optional[List[dict]], Optional[int], Optional[int]]:
     channel_file = os.path.join(channels_db_dir, channel_name + ".json")
-    if not os.path.exists(channel_file):
-        return None, None, None
-
-    above = max(0, min(above, 200))
-    below = max(0, min(below, 200))
-
-    if not _IS_WINDOWS:
-        target_idx = _find_line_number_grep(channel_file, f'"id":"{message_id}"')
-        if target_idx is None:
-            return None, None, None
-        
-        total_lines = _count_lines_wc(channel_file)
-        if total_lines == 0:
-            total_lines = target_idx + 1
-        
-        start_line = max(0, target_idx - below)
-        end_line = min(total_lines, target_idx + above + 1)
-        
-        messages = _read_lines_range(channel_file, start_line, end_line)
-        return messages, start_line, end_line
-
-    return _get_messages_around_python(channel_file, message_id, above, below)
-
-
-def _get_messages_around_python(file_path: str, message_id: str, above: int = 50, below: int = 50) -> Tuple[Optional[List[dict]], Optional[int], Optional[int]]:
-    """Pure Python fallback for get_channel_messages_around."""
-    if not os.path.exists(file_path):
-        return None, None, None
-
-    above = max(0, min(above, 200))
-    below = max(0, min(below, 200))
-
-    target_idx = None
-    total_lines = 0
-
-    with open(file_path, 'r', encoding='utf-8') as f:
-        for idx, line in enumerate(f):
-            total_lines = idx + 1
-            if target_idx is None and f'"id":"{message_id}"' in line:
-                target_idx = idx
-
-    if target_idx is None:
-        return None, None, None
-
-    start_line = max(0, target_idx - below)
-    end_line = min(total_lines, target_idx + above + 1)
-
-    messages = _read_lines_range(file_path, start_line, end_line)
-    return messages, start_line, end_line
-
-
-def convert_messages_to_user_format(messages):
-    user_ids_needed = set()
-    for msg in messages:
-        if "user" in msg:
-            user_ids_needed.add(msg["user"])
-        if "reply_to" in msg and "user" in msg["reply_to"]:
-            user_ids_needed.add(msg["reply_to"]["user"])
-        if "reactions" in msg:
-            for uid_list in msg["reactions"].values():
-                user_ids_needed.update(uid_list)
-
-    uid_to_name = {uid: users.get_username_by_id(uid) for uid in user_ids_needed}
-
-    converted = []
-    for msg in messages:
-        msg_copy = msg.copy()
-
-        if "user" in msg_copy:
-            uid = msg_copy["user"]
-            msg_copy["user"] = uid_to_name.get(uid) or uid
-
-        if "reply_to" in msg_copy and "user" in msg_copy["reply_to"]:
-            msg_copy["reply_to"] = msg_copy["reply_to"].copy()
-            uid = msg_copy["reply_to"]["user"]
-            msg_copy["reply_to"]["user"] = uid_to_name.get(uid) or uid
-
-        if "reactions" in msg_copy:
-            converted_reactions = {}
-            for emo, uid_list in msg_copy["reactions"].items():
-                converted_reactions[emo] = [uid_to_name.get(u) or u for u in uid_list]
-            msg_copy["reactions"] = converted_reactions
-
-        msg_copy.setdefault("pinned", False)
-        msg_copy.setdefault("type", "message")
-
-        converted.append(msg_copy)
-
-    return converted
+    return get_messages_around_from_file(channel_file, message_id, above, below)
 
 
 def save_channel_message(channel_name, message, sync: bool = True):

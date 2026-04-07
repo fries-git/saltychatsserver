@@ -3,8 +3,6 @@ import sys
 import time
 import json
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from db import channels, users, roles
 from handlers.websocket_utils import broadcast_to_all, send_to_client, _get_ws_attr
 from logger import Logger

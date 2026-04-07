@@ -1,5 +1,6 @@
 from db import users, roles
 from handlers.messages.helpers import _error, _require_user_id
+from handlers.helpers.validation import get_ws_username as _get_ws_username
 from handlers.websocket_utils import broadcast_to_all, _get_ws_attr, _set_ws_attr
 
 
@@ -17,7 +18,7 @@ async def handle_status_set(ws, message, match_cmd, server_data):
     if not users.set_status(user_id, status, text):
         return _error("Invalid status. Must be one of: online, idle, dnd, invisible", match_cmd)
 
-    username = await _get_ws_username(ws)
+    username = _get_ws_username(ws)
     status_data = {"status": status, "text": text or ""}
 
     previous_status = _get_ws_attr(ws, "status", {}).get("status", "online")
@@ -85,6 +86,3 @@ async def handle_status_get(ws, message, match_cmd, server_data):
 
     return {"cmd": "status", "username": target_username, "status": target_status}
 
-
-async def _get_ws_username(ws):
-    return _get_ws_attr(ws, "username", users.get_username_by_id(_get_ws_attr(ws, "user_id", "")))

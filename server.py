@@ -7,11 +7,12 @@ from handlers.auth import handle_authentication
 from handlers import message as message_handler
 from handlers.rate_limiter import RateLimiter
 from handlers import github_webhook
-from db import serverEmojis, push as push_db, webhooks as webhooks_db, channels, users, roles, attachments as attachments_db
+from db import serverEmojis, push as push_db, webhooks as webhooks_db, channels, users, roles, attachments as attachments_db, permissions as permissions_db
 import watchers
 from plugin_manager import PluginManager
 from logger import Logger
 import slash_handlers
+from constants import DEFAULT_MAX_ATTACHMENT_SIZE, DEFAULT_WEBHOOK_MAX_BODY_SIZE, HEARTBEAT_INTERVAL
 
 
 class OriginChatsServer:
@@ -27,7 +28,7 @@ class OriginChatsServer:
         self._ws_data = {} # Store custom websocket data by ws id
         set_ws_data(self._ws_data)
         self.version = self.config["service"]["version"]
-        self.heartbeat_interval = 30
+        self.heartbeat_interval = HEARTBEAT_INTERVAL
         self.main_event_loop = None
         self.file_observer = None
         self.slash_commands = {}
@@ -651,7 +652,8 @@ class OriginChatsServer:
                     "attachments": attachments_info,
                     "version": "1.1.0",
                     "validator_key": connection_validator_key,
-                    "capabilities": self.capabilities
+                    "capabilities": self.capabilities,
+                    "permissions": list(permissions_db.PERMISSIONS.keys())
                 }
             })
 

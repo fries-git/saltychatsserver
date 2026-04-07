@@ -12,6 +12,14 @@ from PIL import Image
 
 from logger import Logger
 from config_store import get_config_value
+from constants import (
+    DEFAULT_MAX_ATTACHMENT_SIZE,
+    FILE_SIZE_SMALL_MB, FILE_SIZE_MEDIUM_MB, FILE_SIZE_LARGE_MB,
+    EXPIRATION_DAYS_SMALL, EXPIRATION_DAYS_MEDIUM, EXPIRATION_DAYS_LARGE,
+    IMAGE_MAX_WIDTH, IMAGE_MAX_HEIGHT,
+    JPEG_QUALITY, WEBP_QUALITY, PNG_COMPRESSION,
+    UNREFERENCED_ATTACHMENT_HOURS,
+)
 
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 attachments_dir = os.path.join(_MODULE_DIR, "attachments")
@@ -35,7 +43,6 @@ def _ensure_storage():
 
 
 def _build_hash_index(attachments: Dict[str, Dict[str, Any]]) -> None:
-    """Build the hash index from existing attachments."""
     global _hash_index
     _hash_index = {}
     for att_id, att in attachments.items():
@@ -96,31 +103,20 @@ def _get_extension_from_mime(mime_type: str) -> str:
 
 
 def get_max_size() -> int:
-    return get_config_value("attachments", "max_size", default=100 * 1024 * 1024)
+    return get_config_value("attachments", "max_size", default=DEFAULT_MAX_ATTACHMENT_SIZE)
 
 
 def calculate_expiration_days(size_bytes: int) -> float:
-    """
-    Calculate expiration days based on file size.
-    Smaller files last longer, larger files expire faster.
-    
-    Scale:
-    - 5 MB or less: 7 weeks (49 days)
-    - 25 MB: 7 days
-    - 100 MB: 1 day
-    
-    Uses inverse relationship: expiration ∝ 1/size
-    """
     mb = size_bytes / (1024 * 1024)
     
-    if mb <= 5:
-        return 49
-    elif mb >= 100:
+    if mb <= FILE_SIZE_SMALL_MB:
+        return EXPIRATION_DAYS_SMALL
+    elif mb >= FILE_SIZE_LARGE_MB:
         return 1
-    elif mb <= 25:
-        return 7 + (25 - mb) * (42 / 20)
+    elif mb <= FILE_SIZE_MEDIUM_MB:
+        return 7 + (FILE_SIZE_MEDIUM_MB - mb) * (42 / 20)
     else:
-        return 7 - (mb - 25) * (6 / 75)
+        return 7 - (mb - FILE_SIZE_MEDIUM_MB) * (6 / 75)
 
 
 def get_permanent_expiration_days() -> int:
@@ -141,7 +137,6 @@ def get_free_tier_max_expiration_days() -> int:
 
 
 def get_user_attachment_count(uploader_id: str) -> int:
-    """Get the number of non-expired attachments for a user."""
     attachments = _load_attachments()
     count = 0
     for att in attachments.values():
@@ -151,7 +146,6 @@ def get_user_attachment_count(uploader_id: str) -> int:
 
 
 def get_oldest_user_attachment(uploader_id: str) -> Optional[Dict[str, Any]]:
-    """Get the oldest non-expired attachment for a user."""
     attachments = _load_attachments()
     oldest = None
     oldest_time = float('inf')
@@ -182,6 +176,58 @@ def is_type_allowed(mime_type: str) -> bool:
             if mime_type.startswith(base):
                 return True
     return False
+
+
+def _save_image_with_compression(image, filepath, mime_type, compression_config):
+    if not compression_config.get("enabled", True):
+        for key in list(image.info.keys()):
+            if isinstance(key, str) and key.lower() in ["exif", "gps", "location", "geotag"]:
+                del image.info[key]
+        save_kwargs = {"quality": 95} if image.format == "JPEG" else {}
+        image.save(filepath, **save_kwargs)
+        return
+
+    max_width = compression_config.get("max_width", IMAGE_MAX_WIDTH)
+    max_height = compression_config.get("max_height", IMAGE_MAX_HEIGHT)
+
+    if image.width > max_width or image.height > max_height:
+        image.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+
+    if image.mode in ("RGBA", "P") and (image.format == "JPEG" or mime_type == "image/jpeg"):
+        if image.mode == "P":
+            image = image.convert("RGBA")
+        background = Image.new("RGB", image.size, (255, 255, 255))
+        background.paste(image, mask=image.split()[-1] if image.mode == "RGBA" else None)
+        image = background
+
+    save_kwargs = {}
+    output_format = image.format
+
+    if mime_type == "image/jpeg" or output_format == "JPEG":
+        save_kwargs["quality"] = compression_config.get("jpeg_quality", JPEG_QUALITY)
+        save_kwargs["optimize"] = True
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+    elif mime_type == "image/webp" or output_format == "WEBP":
+        save_kwargs["quality"] = compression_config.get("webp_quality", WEBP_QUALITY)
+    elif mime_type == "image/png" or output_format == "PNG":
+        save_kwargs["compress_level"] = compression_config.get("png_compression", PNG_COMPRESSION)
+
+    image.save(filepath, **save_kwargs)
+
+
+def _save_file_bytes(file_bytes, filepath, mime_type, compression_config=None):
+    if not (mime_type.startswith("image/") and mime_type != "image/svg+xml"):
+        with open(filepath, "wb") as f:
+            f.write(file_bytes)
+        return
+
+    try:
+        image = Image.open(BytesIO(file_bytes))
+        _save_image_with_compression(image, filepath, mime_type, compression_config or {})
+    except Exception:
+        with open(filepath, "wb") as f:
+            f.write(file_bytes)
 
 
 def save_attachment(
@@ -267,57 +313,9 @@ def save_attachment(
         filename = f"{attachment_id}.{extension}"
         filepath = os.path.join(attachments_dir, filename)
 
+        compression_config = get_config_value("attachments", "compression", default={})
         try:
-            if mime_type.startswith("image/") and mime_type != "image/svg+xml":
-                try:
-                    image = Image.open(BytesIO(file_bytes))
-                    
-                    compression_config = get_config_value("attachments", "compression", default={})
-                    compression_enabled = compression_config.get("enabled", True)
-                    
-                    if compression_enabled:
-                        max_width = compression_config.get("max_width", 1920)
-                        max_height = compression_config.get("max_height", 1920)
-                        
-                        if image.width > max_width or image.height > max_height:
-                            image.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
-                        
-                        if image.mode in ("RGBA", "P"):
-                            if image.format == "JPEG" or mime_type == "image/jpeg":
-                                background = Image.new("RGB", image.size, (255, 255, 255))
-                                if image.mode == "P":
-                                    image = image.convert("RGBA")
-                                background.paste(image, mask=image.split()[-1] if image.mode == "RGBA" else None)
-                                image = background
-                        
-                        save_kwargs = {}
-                        output_format = image.format
-                        
-                        if mime_type == "image/jpeg" or output_format == "JPEG":
-                            save_kwargs["quality"] = compression_config.get("jpeg_quality", 85)
-                            save_kwargs["optimize"] = True
-                            if image.mode != "RGB":
-                                image = image.convert("RGB")
-                        elif mime_type == "image/webp" or output_format == "WEBP":
-                            save_kwargs["quality"] = compression_config.get("webp_quality", 85)
-                        elif mime_type == "image/png" or output_format == "PNG":
-                            save_kwargs["compress_level"] = compression_config.get("png_compression", 6)
-                        
-                        image.save(filepath, **save_kwargs)
-                    else:
-                        for key in list(image.info.keys()):
-                            if isinstance(key, str) and key.lower() in ["exif", "gps", "location", "geotag"]:
-                                del image.info[key]
-                        save_kwargs = {}
-                        if image.format == "JPEG":
-                            save_kwargs["quality"] = 95
-                        image.save(filepath, **save_kwargs)
-                except Exception:
-                    with open(filepath, "wb") as f:
-                        f.write(file_bytes)
-            else:
-                with open(filepath, "wb") as f:
-                    f.write(file_bytes)
+            _save_file_bytes(file_bytes, filepath, mime_type, compression_config)
         except Exception as e:
             Logger.error(f"Failed to save attachment file: {e}")
             return None
@@ -386,7 +384,6 @@ def get_attachment_file_path(attachment_id: str) -> Optional[str]:
 
 
 def delete_attachment_internal(attachment_id: str, attachments: Dict[str, Dict[str, Any]]) -> bool:
-    """Delete an attachment using provided attachments dict (internal use)."""
     if attachment_id not in attachments:
         return False
 
@@ -477,7 +474,6 @@ def get_attachment_info_for_client(attachment: Dict[str, Any], base_url: str = "
 
 
 def mark_attachment_referenced(attachment_id: str) -> bool:
-    """Mark an attachment as referenced in a message."""
     with _lock:
         attachments = _load_attachments()
         if attachment_id not in attachments:
@@ -488,7 +484,6 @@ def mark_attachment_referenced(attachment_id: str) -> bool:
 
 
 def mark_attachments_referenced(attachment_ids: List[str]) -> int:
-    """Mark multiple attachments as referenced. Returns count marked."""
     count = 0
     with _lock:
         attachments = _load_attachments()
@@ -502,7 +497,6 @@ def mark_attachments_referenced(attachment_ids: List[str]) -> int:
 
 
 def cleanup_unreferenced_attachments() -> int:
-    """Remove attachments that are not referenced in any messages and older than 1 hour."""
     with _lock:
         attachments = _load_attachments()
         now = time.time()
@@ -513,7 +507,7 @@ def cleanup_unreferenced_attachments() -> int:
             if attachment.get("referenced", False):
                 continue
             created_at = attachment.get("created_at", 0)
-            if now - created_at > one_hour:
+            if now - created_at > UNREFERENCED_ATTACHMENT_HOURS * 3600:
                 removed_ids.append(attachment_id)
 
         for attachment_id in removed_ids:
@@ -535,7 +529,6 @@ def cleanup_unreferenced_attachments() -> int:
 
 
 def run_daily_cleanup() -> dict:
-    """Run the daily cleanup tasks. Returns counts of removed items."""
     expired_count = cleanup_expired_attachments()
     unreferenced_count = cleanup_unreferenced_attachments()
     

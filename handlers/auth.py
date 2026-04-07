@@ -3,7 +3,6 @@ from db import users, roles, push as push_db
 from handlers.websocket_utils import send_to_client, broadcast_to_all, _get_ws_attr, _set_ws_attr
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logger import Logger
 
 async def handle_authentication(websocket, data, config_data, connected_clients, client_ip, server_data=None, validator_key=None):
@@ -49,9 +48,13 @@ async def handle_authentication(websocket, data, config_data, connected_clients,
 
     is_new_user = not users.user_exists(user_id)
     if is_new_user:
-        users.add_user(user_id, username)
-        Logger.add(f"User {username} (ID: {user_id}) created")
-        _set_ws_attr(websocket, "user_roles", ["user"])
+        added = users.add_user(user_id, username)
+        if added:
+            Logger.add(f"User {username} (ID: {user_id}) created")
+            _set_ws_attr(websocket, "user_roles", ["user"])
+        else:
+            is_new_user = False
+            Logger.warning(f"User {username} (ID: {user_id}) was added by another process")
     elif user:
         _set_ws_attr(websocket, "user_roles", user.get("roles", []))
 
@@ -94,15 +97,18 @@ async def handle_authentication(websocket, data, config_data, connected_clients,
 
     # Broadcast user connection to all clients (send username, not ID)
     if is_new_user:
-        await broadcast_to_all(connected_clients, {
-            "cmd": "user_join",
-            "user": {
-                "username": username,
-                "roles": user.get("roles"),
-                "color": color
-            }
-        })
-        Logger.success(f"Broadcast user_join: {username} joined the server")
+        if users.is_user_banned(user_id):
+            Logger.warning(f"User {username} (ID: {user_id}) was banned after initial check, skipping user_join broadcast")
+        else:
+            await broadcast_to_all(connected_clients, {
+                "cmd": "user_join",
+                "user": {
+                    "username": username,
+                    "roles": user.get("roles"),
+                    "color": color
+                }
+            })
+            Logger.success(f"Broadcast user_join: {username} joined the server")
 
     # Plugin event
     if server_data and "plugin_manager" in server_data:

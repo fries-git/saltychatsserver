@@ -2,7 +2,6 @@ import json, os, sys, asyncio, base64
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logger import Logger
 from db import push as push_db
 from handlers.websocket_utils import _get_ws_attr

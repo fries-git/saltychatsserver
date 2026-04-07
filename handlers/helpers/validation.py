@@ -1,4 +1,4 @@
-from db import channels, users
+from db import channels, users, permissions as perms
 from config_store import get_config_value
 from handlers.websocket_utils import _get_ws_attr
 from typing import TypeVar
@@ -7,7 +7,7 @@ from schemas.embed_schema import Embed, validate_embeds as schema_validate_embed
 T = TypeVar("T")
 
 
-def error(error_message, match_cmd=None):
+def make_error(error_message, match_cmd=None):
     if match_cmd:
         return {"cmd": "error", "src": match_cmd, "val": error_message}
     return {"cmd": "error", "val": error_message}
@@ -21,7 +21,7 @@ def config_value(server_data, *path: str, default: T) -> T:
 def require_user_id(ws, error_message: str = "User not authenticated"):
     user_id = _get_ws_attr(ws, "user_id")
     if not user_id:
-        return None, error(error_message)
+        return None, make_error(error_message)
     return user_id, None
 
 
@@ -29,10 +29,27 @@ def require_user_roles(user_id, *, requiredRoles=[], forbiddenRoles=[], missing_
     user_roles = users.get_user_roles(user_id)
     for role in requiredRoles:
         if not user_roles or role not in user_roles:
-            return None, error(f"Access denied: '{role}' role required")
+            return None, make_error(f"Access denied: '{role}' role required")
     if not user_roles:
-        return None, error(missing_roles_message)
+        return None, make_error(missing_roles_message)
     return user_roles, None
+
+
+def require_permission(user_id, permission, match_cmd, channel_name=None):
+    if not perms.has_permission(user_id, permission, channel_name):
+        return make_error(f"Access denied: '{permission}' permission required", match_cmd)
+    return None
+
+
+def require_can_manage_role(actor_id, target_role, match_cmd):
+    can_manage, error_msg = perms.can_manage_role(actor_id, target_role)
+    if not can_manage:
+        return make_error(error_msg, match_cmd)
+    return None
+
+
+def get_ws_username(ws):
+    return _get_ws_attr(ws, "username", users.get_username_by_id(_get_ws_attr(ws, "user_id", "")))
 
 
 def require_text_channel_access(user_id, channel_name):

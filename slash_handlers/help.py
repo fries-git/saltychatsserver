@@ -1,7 +1,4 @@
 import os
-import sys
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from slash_handlers import SERVER_SLASH_HANDLERS
 from handlers.websocket_utils import _get_ws_attr

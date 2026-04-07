@@ -8,9 +8,15 @@ def load_plugin_config(config_filename: str, defaults: dict) -> dict:
     config_path = os.path.join(os.path.dirname(__file__), config_filename)
     try:
         with open(config_path, "r") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        Logger.warning(f"{config_filename} not found, using defaults")
+            content = f.read()
+            if not content.strip():
+                raise ValueError("Empty config file")
+            return json.loads(content)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:
+        Logger.warning(
+            f"{config_filename} not found or invalid, creating with defaults"
+        )
+        save_plugin_config(config_filename, defaults)
         return defaults
 
 

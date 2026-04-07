@@ -55,7 +55,7 @@ DEFAULT_ROLES = {
     "user": {
         "id": None,
         "description": "Regular user role with standard permissions.",
-        "color": "#FFFFFF",
+        "color": None,
         "hoisted": False,
         "permissions": [
             "send_messages", "read_message_history",

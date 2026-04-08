@@ -84,7 +84,7 @@ def get_thread_context(thread_id, user_id, user_roles, require_view=True):
     return {"thread": thread_data, "parent_channel": parent_channel}, None
 
 
-def get_channel_or_thread_context(channel_name, thread_id, user_id, user_roles, require_send=False):
+async def get_channel_or_thread_context(channel_name, thread_id, user_id, user_roles, require_send=False):
     if thread_id:
         ctx, err = get_thread_context(thread_id, user_id, user_roles, require_view=True)
         if err:

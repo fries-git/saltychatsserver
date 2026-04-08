@@ -246,6 +246,8 @@ def save_attachment(
         if not is_type_allowed(mime_type):
             Logger.warning(f"Attachment rejected: mime type {mime_type} not allowed")
             return None
+        
+        Logger.info(f"Processing attachment upload for {uploader_name}: mime={mime_type}, channel={channel}")
 
         try:
             if file_data.startswith("data:"):
@@ -264,14 +266,18 @@ def save_attachment(
             return None
 
         max_attachments = get_max_attachments_per_user()
+        Logger.info(f"Max attachments per user: {max_attachments}, current count for {uploader_name}: {get_user_attachment_count(uploader_id) if max_attachments > 0 else 'N/A'}")
+        
         if max_attachments == 0:
             Logger.warning(f"Attachment rejected: uploads are disabled (max_attachments_per_user=0)")
             return None
 
         attachments = _load_attachments()
+        Logger.info(f"Loaded attachments database, total attachments: {len(attachments)}")
 
         if max_attachments > 0:
             current_count = get_user_attachment_count(uploader_id)
+            Logger.info(f"Checking attachment limit: {current_count}/{max_attachments} for {uploader_name}")
             if current_count >= max_attachments:
                 oldest = get_oldest_user_attachment(uploader_id)
                 if oldest:
@@ -279,6 +285,7 @@ def save_attachment(
                     delete_attachment_internal(oldest["id"], attachments)
 
         file_hash = hashlib.sha256(file_bytes).hexdigest()
+        Logger.info(f"Generated file hash: {file_hash[:16]}... for {original_name}")
 
         if file_hash in _hash_index:
             existing_id = _hash_index[file_hash]
@@ -314,13 +321,18 @@ def save_attachment(
         filepath = os.path.join(attachments_dir, filename)
 
         compression_config: Dict[str, Any] = get_config_value("attachments", "compression", default={})
+        Logger.info(f"Attempting to save attachment file: {filepath}, compression enabled: {compression_config.get('enabled', True)}")
         try:
             _save_file_bytes(file_bytes, filepath, mime_type, compression_config)
+            Logger.success(f"Attachment file saved successfully: {filepath}")
         except Exception as e:
             Logger.error(f"Failed to save attachment file: {e}")
+            import traceback
+            Logger.error(traceback.format_exc())
             return None
 
         actual_size = os.path.getsize(filepath)
+    Logger.info(f"File saved, actual size: {actual_size} bytes")
 
     now = time.time()
     if permanent:
@@ -339,28 +351,36 @@ def save_attachment(
             expiration_days = max_expiration_days
         expires_at = now + (expiration_days * 24 * 60 * 60)
 
-        attachment = {
-            "id": attachment_id,
-            "filename": filename,
-            "original_name": original_name,
-            "mime_type": mime_type,
-            "size": actual_size,
-            "hash": file_hash,
-            "uploader_id": uploader_id,
-            "uploader_name": uploader_name,
-            "channel": channel,
-            "created_at": now,
-            "expires_at": expires_at,
-            "permanent": permanent,
-            "referenced": False,
-        }
+    attachment = {
+        "id": attachment_id,
+        "filename": filename,
+        "original_name": original_name,
+        "mime_type": mime_type,
+        "size": actual_size,
+        "hash": file_hash,
+        "uploader_id": uploader_id,
+        "uploader_name": uploader_name,
+        "channel": channel,
+        "created_at": now,
+        "expires_at": expires_at,
+        "permanent": permanent,
+        "referenced": False,
+    }
 
-        attachments[attachment_id] = attachment
-        _hash_index[file_hash] = attachment_id
+    attachments[attachment_id] = attachment
+    _hash_index[file_hash] = attachment_id
+    Logger.info(f"Saving attachment metadata to database: {attachment_id}")
+    try:
         _save_attachments(attachments)
+        Logger.success(f"Attachment metadata saved to database: {attachment_id}")
+    except Exception as e:
+        Logger.error(f"Failed to save attachment metadata: {e}")
+        import traceback
+        Logger.error(traceback.format_exc())
+        return None
 
-        Logger.success(f"Attachment saved: {attachment_id} by {uploader_name}")
-        return attachment
+    Logger.success(f"Attachment saved: {attachment_id} by {uploader_name}")
+    return attachment
 
 
 def get_attachment(attachment_id: str) -> Optional[Dict[str, Any]]:

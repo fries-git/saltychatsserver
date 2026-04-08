@@ -26,7 +26,7 @@ async def handle_react_add(ws, message, match_cmd, _get_channel_or_thread_contex
     if not message_id or not emoji_str:
         return _error("Message ID and emoji are required", match_cmd)
 
-    ctx, err = _get_channel_or_thread_context(channel_name, thread_id, user_id, user_roles)
+    ctx, err = await _get_channel_or_thread_context(channel_name, thread_id, user_id, user_roles)
     if err:
         msg, key = err
         return _error(msg, match_cmd)
@@ -77,7 +77,7 @@ async def handle_react_remove(ws, message, match_cmd, _get_channel_or_thread_con
     if error:
         return error
 
-    ctx, err = _get_channel_or_thread_context(channel_name, thread_id, user_id, user_roles)
+    ctx, err = await _get_channel_or_thread_context(channel_name, thread_id, user_id, user_roles)
     if err:
         msg, key = err
         return _error(msg, match_cmd)

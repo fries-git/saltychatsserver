@@ -225,7 +225,7 @@ async def handle(ws, message, server_data: dict) -> dict | None:
         case "webhook_regenerate":
             return await handle_webhook_regenerate(ws, message, match_cmd)
         case "embeds_list":
-            return _handle_embeds_list(ws, message, match_cmd)
+            return await _handle_embeds_list(ws, message, match_cmd)
         case "poll_create":
             return await handle_poll_create(ws, message, match_cmd, server_data)
         case "poll_vote":
@@ -813,7 +813,7 @@ def _handle_thread_leave(ws, message, match_cmd):
     return {"cmd": "thread_leave", "thread": updated, "thread_id": thread_id, "user": username, "global": True}
 
 
-def _handle_embeds_list(ws, message, match_cmd):
+async def _handle_embeds_list(ws, message, match_cmd):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
@@ -827,7 +827,7 @@ def _handle_embeds_list(ws, message, match_cmd):
     user_roles, error = _require_user_roles(user_id)
     if error:
         return error
-    ctx, err = _get_channel_or_thread_context(channel, thread_id, user_id, user_roles)
+    ctx, err = await _get_channel_or_thread_context(channel, thread_id, user_id, user_roles)
     if err:
         return _error(err[0], match_cmd)
     if not ctx:

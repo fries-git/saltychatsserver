@@ -42,7 +42,7 @@ async def handle_message_edit(ws, message, server_data):
     if not user_roles:
         return _error("User roles not found", match_cmd)
 
-    ctx, err = _get_channel_or_thread_context(channel_name, thread_id, user_id, user_roles)
+    ctx, err = await _get_channel_or_thread_context(channel_name, thread_id, user_id, user_roles)
     if err:
         msg, key = err
         return _error(msg, match_cmd)

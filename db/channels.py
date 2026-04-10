@@ -465,13 +465,25 @@ def get_all_channels():
         return copy.deepcopy(_get_channels_cache())
 
 
+def _check_permission_list(allowed_roles, user_roles):
+    blocked_roles = {r[1:] for r in allowed_roles if r.startswith("!")}
+    allowed_roles_clean = {r for r in allowed_roles if not r.startswith("!")}
+    
+    for role in user_roles:
+        if role in blocked_roles:
+            return False
+        if role in allowed_roles_clean:
+            return True
+    return False
+
+
 def get_all_channels_for_roles(roles):
     with _global_lock:
         result = []
         for channel in _get_channels_cache():
             permissions = channel.get("permissions", {})
             view_roles = permissions.get("view", [])
-            if not any(role in view_roles for role in roles):
+            if not _check_permission_list(view_roles, roles):
                 continue
             channel_copy = copy.deepcopy(channel)
             result.append(channel_copy)
@@ -484,7 +496,7 @@ def does_user_have_permission(channel_name, user_roles, permission_type):
         permissions = DEFAULT_PERMISSIONS
 
     allowed_roles = permissions.get(permission_type, [])
-    return any(role in allowed_roles for role in user_roles)
+    return _check_permission_list(allowed_roles, user_roles)
 
 
 def create_channel(

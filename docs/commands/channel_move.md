@@ -1,6 +1,6 @@
 # Command: channel_move
 
-Move a channel to a new position in the channel list (owner only).
+Move a channel to a new position in the channel list. Requires `manage_channels` permission.
 
 ## Request
 
@@ -33,15 +33,19 @@ Move a channel to a new position in the channel list (owner only).
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_channels permission required"}`
 - `{"cmd": "error", "val": "Channel name is required"}`
 - `{"cmd": "error", "val": "Position is required"}`
 - `{"cmd": "error", "val": "Position must be a non-negative integer"}`
 - `{"cmd": "error", "val": "Channel not found"}`
 
+## Permissions
+
+- Requires `manage_channels` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Channels can only be moved by users with the `manage_channels` permission.
 - Channel positions are 0-based (first channel is position 0).
 - Moving a channel to position 0 makes it the first channel in the list.
 - Moving a channel beyond the last position will place it at the end.

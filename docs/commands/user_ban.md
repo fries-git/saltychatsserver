@@ -1,6 +1,6 @@
 # Command: user_ban
 
-Ban a user from the server (owner only).
+Ban a user from the server. Requires `manage_users` permission.
 
 ## Request
 
@@ -42,11 +42,15 @@ If the user was already banned or doesn't exist:
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_users permission required"}`
+
+## Permissions
+
+- Requires `manage_users` permission.
 
 ## Notes
 
-- Requires `owner` role.
+- Users can only be banned by users with the `manage_users` permission.
 - Banned users cannot authenticate with the server.
 - Banned users that are currently connected remain connected until they disconnect.
 - Attempting to connect while banned results in `{"cmd": "auth_error", "val": "Access denied: You are banned from this server"}`.

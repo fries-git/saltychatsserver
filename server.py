@@ -1,17 +1,18 @@
-import asyncio, json, os, mimetypes, secrets, uuid, time
-from urllib.parse import urlsplit, unquote
+import asyncio, json, os, secrets, uuid, time
+from urllib.parse import unquote
 from aiohttp import web
 import aiohttp
 from handlers.websocket_utils import send_to_client, heartbeat, broadcast_to_all, broadcast_to_all_except, broadcast_to_channel_except, broadcast_to_voice_channel_with_viewers, set_ws_data
-from handlers.auth import handle_authentication
+from handlers.auth import handle_authentication, handle_cracked_auth, handle_cracked_register
 from handlers import message as message_handler
 from handlers.rate_limiter import RateLimiter
 from handlers import github_webhook
-from db import serverEmojis, push as push_db, webhooks as webhooks_db, channels, users, roles, attachments as attachments_db
+from db import serverEmojis, push as push_db, webhooks as webhooks_db, channels, users, roles, attachments as attachments_db, permissions as permissions_db
 import watchers
 from plugin_manager import PluginManager
 from logger import Logger
 import slash_handlers
+from constants import HEARTBEAT_INTERVAL
 
 
 class OriginChatsServer:
@@ -27,7 +28,7 @@ class OriginChatsServer:
         self._ws_data = {} # Store custom websocket data by ws id
         set_ws_data(self._ws_data)
         self.version = self.config["service"]["version"]
-        self.heartbeat_interval = 30
+        self.heartbeat_interval = HEARTBEAT_INTERVAL
         self.main_event_loop = None
         self.file_observer = None
         self.slash_commands = {}
@@ -194,6 +195,18 @@ class OriginChatsServer:
 
         return file_path
 
+    def _resolve_emoji_file_path_by_id(self, emoji_id):
+        """
+        Resolve emoji file path by emoji ID.
+        Returns absolute file path or None if not found.
+        """
+        if not emoji_id:
+            return None
+        file_name = serverEmojis.get_emoji_file_name(str(emoji_id))
+        if not file_name:
+            return None
+        return self._resolve_emoji_file_path(file_name)
+
     def _cors_headers(self):
         return {
             "Access-Control-Allow-Origin": "*",
@@ -231,14 +244,15 @@ class OriginChatsServer:
             "server": {
                 "name": self.config.get("server", {}).get("name", ""),
                 "icon": self.config.get("server", {}).get("icon", ""),
+                "banner": self.config.get("server", {}).get("banner", ""),
                 "owner": self.config.get("server", {}).get("owner", {})
             },
             "stats": {
-                "total_users": len(users._load_users()),
+                "total_users": users.count_users(),
                 "connected_users": len(self.connected_clients),
                 "online_users": len(self.connected_usernames),
                 "total_channels": len(channels._load_channels_index()),
-                "total_roles": len(roles._load_roles())
+                "total_roles": roles.count_roles()
             }
         }
         return self._apply_cors(web.Response(
@@ -248,8 +262,10 @@ class OriginChatsServer:
         ))
 
     async def _route_emoji(self, request):
-        file_name = unquote(request.match_info.get("filename", "")).strip()
-        file_path = self._resolve_emoji_file_path(file_name)
+        param = unquote(request.match_info.get("filename", "")).strip()
+        file_path = self._resolve_emoji_file_path(param)
+        if not file_path:
+            file_path = self._resolve_emoji_file_path_by_id(param)
         if not file_path:
             return self._apply_cors(web.Response(status=404, text="Emoji not found"))
         return self._apply_cors(web.FileResponse(file_path, headers={
@@ -534,7 +550,7 @@ class OriginChatsServer:
 
         github_event = request.headers.get("X-GitHub-Event", "")
         if github_event and "repository" in data and "ref" in data:
-            msg_for_client, error = github_webhook.handle_github_webhook(data, github_event, channel_name)
+            msg_for_client, error = await github_webhook.handle_github_webhook(data, github_event, channel_name)
             if error:
                 return self._apply_cors(web.Response(
                     status=400,
@@ -636,7 +652,9 @@ class OriginChatsServer:
                     "attachments": attachments_info,
                     "version": "1.1.0",
                     "validator_key": connection_validator_key,
-                    "capabilities": self.capabilities
+                    "capabilities": self.capabilities,
+                    "permissions": list(permissions_db.PERMISSIONS.keys()),
+                    "auth_mode": self.config.get("auth_mode", "rotur")
                 }
             })
 
@@ -647,6 +665,11 @@ class OriginChatsServer:
                         ws_data = self._ws_data.get(ws_id, {})
 
                         if data.get("cmd") == "auth" and not ws_data.get("authenticated", False):
+                            auth_mode = self.config.get("auth_mode", "rotur")
+                            if auth_mode == "cracked-only":
+                                await send_to_client(ws, {"cmd": "auth_error", "val": "Rotur authentication is disabled. Use login or register commands."})
+                                continue
+                            
                             auth_server_data = {
                                 "connected_clients": self.connected_clients,
                                 "connected_usernames": self.connected_usernames,
@@ -660,6 +683,23 @@ class OriginChatsServer:
                                 validator_key=ws_data.get("validator_key")
                             )
                             continue
+
+                        auth_mode = self.config.get("auth_mode", "rotur")
+                        if auth_mode in ("cracked", "cracked-only") and not ws_data.get("authenticated", False):
+                            auth_server_data = {
+                                "connected_clients": self.connected_clients,
+                                "connected_usernames": self.connected_usernames,
+                                "config": self.config,
+                                "plugin_manager": self.plugin_manager,
+                                "rate_limiter": self.rate_limiter,
+                                "_ws_data": self._ws_data
+                            }
+                            if data.get("cmd") == "login":
+                                await handle_cracked_auth(ws, data, self.config, self.connected_clients, client_ip, auth_server_data)
+                                continue
+                            elif data.get("cmd") == "register":
+                                await handle_cracked_register(ws, data, self.config, self.connected_clients, client_ip, auth_server_data)
+                                continue
 
                         if not ws_data.get("authenticated", False):
                             await send_to_client(ws, {"cmd": "auth_error", "val": "Authentication required"})

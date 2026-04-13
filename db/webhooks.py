@@ -2,16 +2,16 @@ import copy
 import json
 import os
 import threading
-import uuid
 import time
+import uuid
 from typing import Dict, List, Optional
 
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 webhooks_file = os.path.join(_MODULE_DIR, "webhooks.json")
-DEFAULT_WEBHOOKS = {}
+
+DEFAULT_WEBHOOKS: Dict[str, dict] = {}
 
 _lock = threading.RLock()
-
 _webhooks_cache: Dict[str, dict] = {}
 _webhooks_loaded: bool = False
 
@@ -31,7 +31,7 @@ def _save_webhooks(webhooks_dict: Dict[str, dict]) -> None:
     global _webhooks_cache, _webhooks_loaded
     tmp = webhooks_file + ".tmp"
     with open(tmp, "w") as f:
-        json.dump(webhooks_dict, f, indent=4)
+        json.dump(webhooks_dict, f, indent=2)
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, webhooks_file)
@@ -50,7 +50,7 @@ def _ensure_storage():
     if not os.path.exists(webhooks_file):
         tmp = webhooks_file + ".tmp"
         with open(tmp, "w") as f:
-            json.dump(DEFAULT_WEBHOOKS, f, indent=4)
+            json.dump(DEFAULT_WEBHOOKS, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, webhooks_file)
@@ -59,94 +59,57 @@ def _ensure_storage():
 _ensure_storage()
 
 
-def create_webhook(channel: str, name: str, created_by: str) -> Optional[dict]:
-    """
-    Create a new webhook for a channel.
-    Returns the webhook data including the token.
-    """
+def create_webhook(channel: str, name: str, created_by: str, avatar: Optional[str] = None) -> dict:
+    webhook_id = str(uuid.uuid4())
+    token = str(uuid.uuid4()) + str(uuid.uuid4()).replace("-", "")
+
+    webhook_data = {
+        "id": webhook_id,
+        "channel": channel,
+        "name": name,
+        "token": token,
+        "created_by": created_by,
+        "created_at": time.time(),
+        "avatar": avatar
+    }
+
     with _lock:
         webhooks = _get_webhooks_cache()
-        
-        webhook_id = str(uuid.uuid4())
-        token = str(uuid.uuid4()) + str(uuid.uuid4()).replace("-", "")
-        
-        webhook_data = {
-            "id": webhook_id,
-            "channel": channel,
-            "name": name,
-            "token": token,
-            "created_by": created_by,
-            "created_at": time.time(),
-            "avatar": None
-        }
-        
         webhooks[webhook_id] = webhook_data
         _save_webhooks(webhooks)
-        
-        return copy.deepcopy(webhook_data)
+
+    return webhook_data
 
 
 def get_webhook(webhook_id: str) -> Optional[dict]:
-    """
-    Get a webhook by ID.
-    Returns webhook data without the token for security.
-    """
     with _lock:
-        webhooks = _get_webhooks_cache()
-        webhook = webhooks.get(webhook_id)
-        if webhook:
-            result = copy.deepcopy(webhook)
-            return result
-        return None
+        webhook = _get_webhooks_cache().get(webhook_id)
+        return copy.deepcopy(webhook) if webhook else None
 
 
 def get_webhook_by_token(token: str) -> Optional[dict]:
-    """
-    Get a webhook by its token (for incoming webhook requests).
-    Returns full webhook data including token.
-    """
     with _lock:
-        webhooks = _get_webhooks_cache()
-        for webhook_id, webhook in webhooks.items():
+        for webhook in _get_webhooks_cache().values():
             if webhook.get("token") == token:
                 return copy.deepcopy(webhook)
-        return None
+    return None
 
 
 def get_webhooks_for_channel(channel: str) -> List[dict]:
-    """
-    Get all webhooks for a channel.
-    Returns webhook data with webhook URLs but without tokens.
-    """
     with _lock:
-        webhooks = _get_webhooks_cache()
         result = []
-        for webhook in webhooks.values():
+        for webhook in _get_webhooks_cache().values():
             if webhook.get("channel") == channel:
-                wh_copy = copy.deepcopy(webhook)
-                result.append(wh_copy)
+                result.append(copy.deepcopy(webhook))
         return result
 
 
 def get_all_webhooks() -> List[dict]:
-    """
-    Get all webhooks.
-    Returns webhook data with webhook URLs but without tokens.
-    """
     with _lock:
-        webhooks = _get_webhooks_cache()
-        result = []
-        for webhook in webhooks.values():
-            wh_copy = copy.deepcopy(webhook)
-            result.append(wh_copy)
-        return result
+        return [copy.deepcopy(w) for w in _get_webhooks_cache().values()]
 
 
 def delete_webhook(webhook_id: str) -> bool:
-    """
-    Delete a webhook by ID.
-    Returns True if deleted, False if not found.
-    """
     with _lock:
         webhooks = _get_webhooks_cache()
         if webhook_id in webhooks:
@@ -157,44 +120,27 @@ def delete_webhook(webhook_id: str) -> bool:
 
 
 def update_webhook(webhook_id: str, updates: dict) -> Optional[dict]:
-    """
-    Update a webhook.
-    Returns updated webhook data without token, or None if not found.
-    """
     with _lock:
         webhooks = _get_webhooks_cache()
         if webhook_id not in webhooks:
             return None
-        
-        webhook = webhooks[webhook_id]
-        
+
         if "name" in updates:
-            webhook["name"] = updates["name"]
+            webhooks[webhook_id]["name"] = updates["name"]
         if "avatar" in updates:
-            webhook["avatar"] = updates["avatar"]
-        
+            webhooks[webhook_id]["avatar"] = updates["avatar"]
+
         _save_webhooks(webhooks)
-        
-        result = copy.deepcopy(webhook)
-        del result["token"]
-        return result
+        return copy.deepcopy(webhooks[webhook_id])
 
 
 def webhook_exists_for_channel(channel: str, webhook_id: str) -> bool:
-    """
-    Check if a webhook exists and belongs to a specific channel.
-    """
     with _lock:
-        webhooks = _get_webhooks_cache()
-        webhook = webhooks.get(webhook_id)
+        webhook = _get_webhooks_cache().get(webhook_id)
         return webhook is not None and webhook.get("channel") == channel
 
 
 def get_webhook_owner(webhook_id: str) -> Optional[str]:
-    """
-    Get the user ID of the webhook owner.
-    """
     with _lock:
-        webhooks = _get_webhooks_cache()
-        webhook = webhooks.get(webhook_id)
+        webhook = _get_webhooks_cache().get(webhook_id)
         return webhook.get("created_by") if webhook else None

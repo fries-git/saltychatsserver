@@ -1,28 +1,54 @@
 import copy
 import json
 import os
+import platform
+import subprocess
 import threading
+import time
 import uuid
-from typing import Dict, List, Optional
-from . import users
-from .emoji_utils import is_valid_emoji
+from typing import Dict, List, Optional, Tuple
 
+from . import users
+from .shared import convert_messages_to_user_format
+from .storage_utils import (
+    find_line_number_grep,
+    count_lines_wc,
+    read_lines_range,
+    get_messages_around_from_file,
+    build_id_index,
+)
+
+_IS_WINDOWS = platform.system() == "Windows"
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 threads_db_dir = os.path.join(_MODULE_DIR, "threads")
 thread_messages_dir = os.path.join(_MODULE_DIR, "threadMessages")
 
-_lock = threading.RLock()
+MESSAGE_PADDING_SIZE = 512
 
+_lock = threading.RLock()
+_thread_locks: Dict[str, threading.RLock] = {}
 _threads_cache: Dict[str, dict] = {}
 _messages_cache: Dict[str, dict] = {}
 
 
+def _get_thread_lock(thread_id: str) -> threading.RLock:
+    if thread_id not in _thread_locks:
+        with _lock:
+            if thread_id not in _thread_locks:
+                _thread_locks[thread_id] = threading.RLock()
+    return _thread_locks[thread_id]
+
+
 def _ensure_storage():
-	os.makedirs(threads_db_dir, exist_ok=True)
-	os.makedirs(thread_messages_dir, exist_ok=True)
+    os.makedirs(threads_db_dir, exist_ok=True)
+    os.makedirs(thread_messages_dir, exist_ok=True)
 
 
 _ensure_storage()
+
+
+def _get_timestamp() -> float:
+    return time.time()
 
 
 def _get_thread_file_path(thread_id: str) -> str:
@@ -30,7 +56,7 @@ def _get_thread_file_path(thread_id: str) -> str:
 
 
 def _get_messages_file_path(thread_id: str) -> str:
-	return os.path.join(thread_messages_dir, f"{thread_id}.jsonl")
+    return os.path.join(thread_messages_dir, f"{thread_id}.jsonl")
 
 
 def _load_thread_metadata(thread_id: str) -> Optional[dict]:
@@ -46,14 +72,10 @@ def _save_thread_metadata(thread_id: str, metadata: dict) -> None:
     thread_file = _get_thread_file_path(thread_id)
     tmp = thread_file + ".tmp"
     with open(tmp, 'w') as f:
-        json.dump(metadata, f, indent=4)
+        json.dump(metadata, f, indent=2)
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, thread_file)
-
-
-def _build_id_index(messages):
-    return {msg["id"]: i for i, msg in enumerate(messages) if "id" in msg}
 
 
 def _load_thread_messages(thread_id: str) -> dict:
@@ -97,7 +119,7 @@ def _load_thread_messages(thread_id: str) -> dict:
 
     return {
         "messages": messages,
-        "id_to_idx": _build_id_index(messages),
+        "id_to_idx": build_id_index(messages),
         "offsets": offsets,
         "lengths": lengths,
     }
@@ -140,6 +162,39 @@ def _full_rewrite_messages(thread_id: str):
     cache["lengths"] = lengths
 
 
+def _patch_line_in_place(thread_id: str, idx: int, new_serialised: str) -> bool:
+    cache = _messages_cache.get(thread_id)
+    if cache is None or cache.get("offsets") is None:
+        return False
+
+    offsets = cache["offsets"]
+    lengths = cache["lengths"]
+
+    if idx >= len(offsets):
+        return False
+
+    new_bytes = new_serialised.encode("utf-8")
+    orig_len = lengths[idx]
+
+    if len(new_bytes) > orig_len:
+        return False
+
+    padding = orig_len - len(new_bytes)
+    if padding > 0:
+        new_bytes = new_bytes + b" " * padding
+
+    messages_file = _get_messages_file_path(thread_id)
+    try:
+        with open(messages_file, "r+b") as f:
+            f.seek(offsets[idx])
+            f.write(new_bytes)
+            f.flush()
+            os.fsync(f.fileno())
+        return True
+    except OSError:
+        return False
+
+
 def create_thread(parent_channel: str, name: str, creator: str) -> dict:
     thread_id = str(uuid.uuid4())
 
@@ -154,269 +209,294 @@ def create_thread(parent_channel: str, name: str, creator: str) -> dict:
         "participants": [creator],
     }
 
-    with _lock:
-        _ensure_storage()
-        _save_thread_metadata(thread_id, metadata)
-        _threads_cache[thread_id] = metadata
-        _messages_cache[thread_id] = {
-            "messages": [],
-            "id_to_idx": {},
-            "offsets": [],
-            "lengths": [],
-        }
+    _save_thread_metadata(thread_id, metadata)
+    _threads_cache[thread_id] = metadata
+
+    _messages_cache[thread_id] = {
+        "messages": [],
+        "id_to_idx": {},
+        "offsets": [],
+        "lengths": [],
+    }
 
     return copy.deepcopy(metadata)
 
 
-def _get_timestamp() -> float:
-    import time
-    return time.time()
-
-
 def get_thread(thread_id: str) -> Optional[dict]:
-    with _lock:
-        if thread_id in _threads_cache:
-            return copy.deepcopy(_threads_cache[thread_id])
+    if thread_id in _threads_cache:
+        return copy.deepcopy(_threads_cache[thread_id])
 
-        metadata = _load_thread_metadata(thread_id)
-        if metadata:
-            created_by = metadata.get("created_by")
-            participants = metadata.get("participants", [])
-            if created_by and created_by not in participants:
-                participants.append(created_by)
-                metadata["participants"] = participants
-                _save_thread_metadata(thread_id, metadata)
-            _threads_cache[thread_id] = metadata
-            return metadata
+    metadata = _load_thread_metadata(thread_id)
+    if not metadata:
+        return None
+
+    _threads_cache[thread_id] = metadata
+    return metadata
 
 
 def get_channel_threads(channel_name: str) -> List[dict]:
-    threads = []
-    with _lock:
-        for filename in os.listdir(threads_db_dir):
-            if filename.endswith('.json') and not filename.endswith('_messages.jsonl'):
-                thread_id = filename[:-5]
-                metadata = get_thread(thread_id)
-                if metadata and metadata.get("parent_channel") == channel_name:
-                    threads.append(metadata)
-    
-    threads.sort(key=lambda t: t.get("created_at", 0), reverse=True)
-    return threads
+    result = []
+    for filename in os.listdir(threads_db_dir):
+        if filename.endswith('.json'):
+            thread_id = filename[:-5]
+            metadata = get_thread(thread_id)
+            if metadata and metadata.get("parent_channel") == channel_name:
+                result.append(metadata)
+    return result
 
 
-def delete_thread(thread_id: str) -> bool:
-    with _lock:
-        metadata = get_thread(thread_id)
-        if not metadata:
-            return False
+def get_thread_messages(thread_id: str, start=0, limit=100) -> List[dict]:
+    cache = _get_thread_messages_cache(thread_id)
+    messages = cache["messages"]
 
-        thread_file = _get_thread_file_path(thread_id)
-        messages_file = _get_messages_file_path(thread_id)
+    if not messages:
+        return []
 
-        try:
-            os.remove(thread_file)
-        except OSError:
-            pass
+    if not limit:
+        limit = 100
+    if limit > 200:
+        limit = 200
 
-        try:
-            os.remove(messages_file)
-        except OSError:
-            pass
+    if isinstance(start, int):
+        if start < 0:
+            start = 0
+        end = len(messages) - start
+        begin = max(0, end - limit)
+    else:
+        idx = cache["id_to_idx"].get(start)
+        if idx is None:
+            return []
+        end = idx
+        begin = max(0, end - limit)
 
-        _threads_cache.pop(thread_id, None)
-        _messages_cache.pop(thread_id, None)
+    begin = max(begin, 0)
+    end = min(end, len(messages))
 
-        return True
-
-
-def update_thread(thread_id: str, updates: dict) -> bool:
-    with _lock:
-        metadata = get_thread(thread_id)
-        if not metadata:
-            return False
-
-        for key in ["name", "locked", "archived", "participants"]:
-            if key in updates:
-                metadata[key] = updates[key]
-
-        _save_thread_metadata(thread_id, metadata)
-        _threads_cache[thread_id] = metadata
-
-        return True
+    return list(messages[begin:end])
 
 
-def save_thread_message(thread_id: str, message: dict) -> bool:
+def save_thread_message(thread_id: str, message: dict, sync: bool = True) -> bool:
+    """Save a message to a thread.
+
+    Args:
+        thread_id: ID of the thread
+        message: Message dict to save
+        sync: If True, fsync to disk (slower but safer). If False, rely on OS buffering (faster).
+    """
     messages_file = _get_messages_file_path(thread_id)
+    cache = _get_thread_messages_cache(thread_id)
+    messages = cache["messages"]
 
-    with _lock:
-        cache = _get_thread_messages_cache(thread_id)
-        messages = cache["messages"]
+    serialised = json.dumps(message, separators=(",", ":"), ensure_ascii=False)
+    serialised_bytes = serialised.encode("utf-8")
+    padded_bytes = serialised_bytes + b" " * MESSAGE_PADDING_SIZE
 
-        serialised = json.dumps(message, separators=(',', ':'), ensure_ascii=False)
-        serialised_bytes = serialised.encode('utf-8')
+    try:
+        with open(messages_file, "rb") as f:
+            first_byte = f.read(1)
+    except FileNotFoundError:
+        first_byte = None
 
-        new_offset: Optional[int] = None
-        if cache["offsets"] is not None:
-            if messages:
-                new_offset = cache["offsets"][-1] + cache["lengths"][-1] + 1
-            else:
-                new_offset = 0
+    if first_byte is not None:
+        new_offset = cache["offsets"][-1] + cache["lengths"][-1] + 1 if messages else 0
+        prefix = b"\n" if messages else b""
 
-        prefix = b'\n' if messages else b''
-        with open(messages_file, 'ab') as f:
-            f.write(prefix + serialised_bytes)
-            f.flush()
-            os.fsync(f.fileno())
+        with open(messages_file, "ab") as f:
+            f.write(prefix + padded_bytes)
+            if sync:
+                f.flush()
+                os.fsync(f.fileno())
 
         idx = len(messages)
         messages.append(message)
         cache["id_to_idx"][message["id"]] = idx
-        if cache["offsets"] is not None and new_offset is not None:
-            cache["offsets"].append(new_offset)
-            cache["lengths"].append(len(serialised_bytes))
+        cache["offsets"].append(new_offset)
+        cache["lengths"].append(len(padded_bytes))
+    else:
+        with open(messages_file, "wb") as f:
+            f.write(padded_bytes)
+            if sync:
+                f.flush()
+                os.fsync(f.fileno())
 
-        return True
+        messages.append(message)
+        cache["id_to_idx"][message["id"]] = 0
+        cache["offsets"] = [0]
+        cache["lengths"] = [len(padded_bytes)]
 
-
-def get_thread_messages(thread_id: str, start=None, limit=100) -> List[dict]:
-    with _lock:
-        cache = _get_thread_messages_cache(thread_id)
-        messages = cache["messages"]
-
-        if not messages:
-            return []
-
-        if limit > 200:
-            limit = 200
-
-        if start is None:
-            begin = max(0, len(messages) - limit)
-            end = len(messages)
-        elif isinstance(start, int):
-            if start < 0:
-                start = 0
-            end = len(messages) - start
-            begin = max(0, end - limit)
-        else:
-            idx = cache["id_to_idx"].get(start)
-            if idx is None:
-                return []
-            end = idx
-            begin = max(0, end - limit)
-
-        if begin >= len(messages):
-            return []
-
-        return [copy.deepcopy(msg) for msg in messages[begin:end]]
-
-
-def get_thread_message(thread_id: str, message_id: str) -> Optional[dict]:
-    with _lock:
-        cache = _get_thread_messages_cache(thread_id)
-        idx = cache["id_to_idx"].get(message_id)
-        if idx is None:
-            return None
-        msg = copy.deepcopy(cache["messages"][idx])
-        msg["position"] = idx + 1
-        return msg
+    return True
 
 
 def edit_thread_message(thread_id: str, message_id: str, new_content: str, embeds=None) -> bool:
-    with _lock:
-        cache = _get_thread_messages_cache(thread_id)
-        id_to_idx = cache["id_to_idx"]
+    cache = _get_thread_messages_cache(thread_id)
+    messages = cache["messages"]
+    idx = cache["id_to_idx"].get(message_id)
 
-        if message_id not in id_to_idx:
-            return False
+    if idx is None:
+        return False
 
-        idx = id_to_idx[message_id]
-        old_msg = cache["messages"][idx]
-        msg = copy.deepcopy(old_msg)
-        msg["content"] = new_content
-        msg["edited"] = True
-        if embeds is not None:
-            msg["embeds"] = embeds
+    messages[idx] = messages[idx].copy()
+    messages[idx]["content"] = new_content
+    messages[idx]["edited"] = True
+    if embeds is not None:
+        messages[idx]["embeds"] = embeds
 
-        cache["messages"][idx] = msg
-        _full_rewrite_messages(thread_id)
-
-        return True
+    _full_rewrite_messages(thread_id)
+    return True
 
 
 def delete_thread_message(thread_id: str, message_id: str) -> bool:
-    with _lock:
-        cache = _get_thread_messages_cache(thread_id)
+    cache = _get_thread_messages_cache(thread_id)
+    messages = cache["messages"]
+    idx = cache["id_to_idx"].get(message_id)
 
-        if message_id not in cache["id_to_idx"]:
+    if idx is None:
+        return False
+
+    messages.pop(idx)
+    cache["id_to_idx"] = build_id_index(messages)
+    _full_rewrite_messages(thread_id)
+    return True
+
+
+def get_thread_message_by_id(thread_id: str, message_id: str) -> Optional[dict]:
+    cache = _get_thread_messages_cache(thread_id)
+    idx = cache["id_to_idx"].get(message_id)
+    if idx is None:
+        return None
+    return cache["messages"][idx].copy()
+
+
+def add_reaction_to_thread_message(thread_id: str, message_id: str, emoji: str, user_id: str) -> bool:
+    with _get_thread_lock(thread_id):
+        cache = _get_thread_messages_cache(thread_id)
+        messages = cache["messages"]
+        idx = cache["id_to_idx"].get(message_id)
+
+        if idx is None:
+            return False
+
+        msg = messages[idx] = messages[idx].copy()
+        if "reactions" not in msg:
+            msg["reactions"] = {}
+
+        if emoji not in msg["reactions"]:
+            msg["reactions"][emoji] = []
+
+        if user_id in msg["reactions"][emoji]:
+            return False
+
+        msg["reactions"][emoji].append(user_id)
+        serialised = json.dumps(msg, separators=(",", ":"), ensure_ascii=False)
+        if not _patch_line_in_place(thread_id, idx, serialised):
+            _full_rewrite_messages(thread_id)
+        return True
+
+
+def remove_reaction_from_thread_message(thread_id: str, message_id: str, emoji: str, user_id: str) -> bool:
+    with _get_thread_lock(thread_id):
+        cache = _get_thread_messages_cache(thread_id)
+        messages = cache["messages"]
+        idx = cache["id_to_idx"].get(message_id)
+
+        if idx is None:
+            return False
+
+        msg = messages[idx] = messages[idx].copy()
+        if "reactions" not in msg or emoji not in msg["reactions"]:
+            return False
+
+        if user_id in msg["reactions"][emoji]:
+            msg["reactions"][emoji].remove(user_id)
+            if not msg["reactions"][emoji]:
+                del msg["reactions"][emoji]
+            if not msg["reactions"]:
+                del msg["reactions"]
+
+            serialised = json.dumps(msg, separators=(",", ":"), ensure_ascii=False)
+            if not _patch_line_in_place(thread_id, idx, serialised):
+                _full_rewrite_messages(thread_id)
             return True
 
-        new_messages = [m for m in cache["messages"] if m.get("id") != message_id]
-        cache["messages"] = new_messages
-        cache["id_to_idx"] = _build_id_index(new_messages)
-        _full_rewrite_messages(thread_id)
+        return False
+
+
+def archive_thread(thread_id: str) -> bool:
+    with _lock:
+        metadata = get_thread(thread_id)
+        if not metadata:
+            return False
+
+        metadata["archived"] = True
+        _save_thread_metadata(thread_id, metadata)
+        _threads_cache[thread_id] = metadata
+        return True
+
+
+def unarchive_thread(thread_id: str) -> bool:
+    with _lock:
+        metadata = get_thread(thread_id)
+        if not metadata:
+            return False
+
+        metadata["archived"] = False
+        _save_thread_metadata(thread_id, metadata)
+        _threads_cache[thread_id] = metadata
+        return True
+
+
+def lock_thread(thread_id: str) -> bool:
+    with _lock:
+        metadata = get_thread(thread_id)
+        if not metadata:
+            return False
+
+        metadata["locked"] = True
+        _save_thread_metadata(thread_id, metadata)
+        _threads_cache[thread_id] = metadata
+        return True
+
+
+def unlock_thread(thread_id: str) -> bool:
+    with _lock:
+        metadata = get_thread(thread_id)
+        if not metadata:
+            return False
+
+        metadata["locked"] = False
+        _save_thread_metadata(thread_id, metadata)
+        _threads_cache[thread_id] = metadata
+        return True
+
+
+def delete_thread(thread_id: str) -> bool:
+    with _lock:
+        thread_file = _get_thread_file_path(thread_id)
+        messages_file = _get_messages_file_path(thread_id)
+
+        if os.path.exists(thread_file):
+            os.remove(thread_file)
+
+        if os.path.exists(messages_file):
+            os.remove(messages_file)
+
+        if thread_id in _threads_cache:
+            del _threads_cache[thread_id]
+
+        if thread_id in _messages_cache:
+            del _messages_cache[thread_id]
 
         return True
 
 
-def convert_messages_to_user_format(messages: List[dict]) -> List[dict]:
-    user_ids_needed = set()
-    for msg in messages:
-        if "user" in msg:
-            user_ids_needed.add(msg["user"])
-        if "reply_to" in msg and "user" in msg["reply_to"]:
-            user_ids_needed.add(msg["reply_to"]["user"])
-        if "reactions" in msg:
-            for uid_list in msg["reactions"].values():
-                user_ids_needed.update(uid_list)
-
-    uid_to_name = {uid: users.get_username_by_id(uid) for uid in user_ids_needed}
-
-    converted = []
-    for msg in messages:
-        msg_copy = msg.copy()
-
-        if "user" in msg_copy:
-            uid = msg_copy["user"]
-            msg_copy["user"] = uid_to_name.get(uid) or uid
-
-        if "reply_to" in msg_copy and "user" in msg_copy["reply_to"]:
-            msg_copy["reply_to"] = msg_copy["reply_to"].copy()
-            uid = msg_copy["reply_to"]["user"]
-            msg_copy["reply_to"]["user"] = uid_to_name.get(uid) or uid
-
-        if "reactions" in msg_copy:
-            converted_reactions = {}
-            for emo, uid_list in msg_copy["reactions"].items():
-                converted_reactions[emo] = [uid_to_name.get(u) or u for u in uid_list]
-            msg_copy["reactions"] = converted_reactions
-
-        msg_copy.setdefault("pinned", False)
-        msg_copy.setdefault("type", "message")
-
-        converted.append(msg_copy)
-
-    return converted
-
-
-def thread_exists(thread_id: str) -> bool:
-    return get_thread(thread_id) is not None
-
-
-def is_thread_locked(thread_id: str) -> bool:
+def get_thread_participants(thread_id: str) -> List[str]:
     metadata = get_thread(thread_id)
     if not metadata:
-        return True
-    return metadata.get("locked", False)
+        return []
+    return metadata.get("participants", [])
 
 
-def is_thread_archived(thread_id: str) -> bool:
-    metadata = get_thread(thread_id)
-    if not metadata:
-        return True
-    return metadata.get("archived", False)
-
-
-def join_thread(thread_id: str, user_id: str) -> bool:
+def add_thread_participant(thread_id: str, user_id: str) -> bool:
     with _lock:
         metadata = get_thread(thread_id)
         if not metadata:
@@ -432,104 +512,79 @@ def join_thread(thread_id: str, user_id: str) -> bool:
         return True
 
 
-def leave_thread(thread_id: str, user_id: str) -> bool:
+def remove_thread_participant(thread_id: str, user_id: str) -> bool:
     with _lock:
         metadata = get_thread(thread_id)
         if not metadata:
             return False
 
         participants = metadata.get("participants", [])
-        if user_id in participants:
+        if user_id in participants and user_id != metadata.get("created_by"):
             participants.remove(user_id)
             metadata["participants"] = participants
             _save_thread_metadata(thread_id, metadata)
             _threads_cache[thread_id] = metadata
+            return True
 
+        return False
+
+
+def reload_threads():
+    global _threads_cache, _messages_cache
+    _threads_cache = {}
+    _messages_cache = {}
+
+
+def is_thread_locked(thread_id: str) -> bool:
+    metadata = get_thread(thread_id)
+    if not metadata:
+        return False
+    return metadata.get("locked", False)
+
+
+def is_thread_archived(thread_id: str) -> bool:
+    metadata = get_thread(thread_id)
+    if not metadata:
+        return False
+    return metadata.get("archived", False)
+
+
+def update_thread(thread_id: str, updates: dict) -> bool:
+    with _lock:
+        metadata = get_thread(thread_id)
+        if not metadata:
+            return False
+        for key, value in updates.items():
+            metadata[key] = value
+        _save_thread_metadata(thread_id, metadata)
+        _threads_cache[thread_id] = metadata
         return True
 
 
-def get_thread_participants(thread_id: str) -> List[str]:
-    metadata = get_thread(thread_id)
-    if not metadata:
-        return []
-    return metadata.get("participants", [])
+def get_thread_message(thread_id: str, message_id: str) -> Optional[dict]:
+    cache = _get_thread_messages_cache(thread_id)
+    idx = cache["id_to_idx"].get(message_id)
+    if idx is None:
+        return None
+    return cache["messages"][idx].copy()
 
 
-def add_thread_reaction(thread_id, message_id, emoji_str, user_id):
-    """
-    Add a reaction to a message in a thread.
-
-    Args:
-        thread_id (str): The ID of the thread.
-        message_id (str): The ID of the message to add the reaction to.
-        emoji_str (str): The emoji to add.
-        user_id (str): The ID of the user to add the reaction for.
-
-    Returns:
-        bool: True if the reaction was added successfully, False otherwise.
-    """
-    with _lock:
-        cache = _get_thread_messages_cache(thread_id)
-        idx = cache["id_to_idx"].get(message_id)
-        if idx is None:
-            return False
-
-        if not is_valid_emoji(emoji_str):
-            return False
-
-        old_msg = cache["messages"][idx]
-        msg = copy.deepcopy(old_msg)
-        msg.setdefault("reactions", {})
-        msg["reactions"].setdefault(emoji_str, [])
-
-        if user_id in msg["reactions"][emoji_str]:
-            return True
-
-        msg["reactions"][emoji_str].append(user_id)
-        cache["messages"][idx] = msg
-        _full_rewrite_messages(thread_id)
-
-    return True
+def join_thread(thread_id: str, user_id: str) -> bool:
+    return add_thread_participant(thread_id, user_id)
 
 
-def remove_thread_reaction(thread_id, message_id, emoji_str, user_id):
-    """
-    Remove a reaction from a message in a thread.
+def leave_thread(thread_id: str, user_id: str) -> bool:
+    return remove_thread_participant(thread_id, user_id)
 
-    Args:
-        thread_id (str): The ID of the thread.
-        message_id (str): The ID of the message to remove the reaction from.
-        emoji_str (str): The emoji to remove.
-        user_id (str): The ID of the user to remove the reaction for.
 
-    Returns:
-        bool: True if the reaction was removed successfully, False otherwise.
-    """
-    with _lock:
-        cache = _get_thread_messages_cache(thread_id)
-        idx = cache["id_to_idx"].get(message_id)
-        if idx is None:
-            return False
+def get_thread_messages_around(thread_id: str, message_id: str, above: int = 50, below: int = 50) -> Tuple[Optional[List[dict]], Optional[int], Optional[int]]:
+    messages_file = _get_messages_file_path(thread_id)
+    return get_messages_around_from_file(messages_file, message_id, above, below)
 
-        if not is_valid_emoji(emoji_str):
-            return False
 
-        old_msg = cache["messages"][idx]
-        msg = copy.deepcopy(old_msg)
+def add_thread_reaction(thread_id: str, message_id: str, emoji: str, user_id: str) -> bool:
+    return add_reaction_to_thread_message(thread_id, message_id, emoji, user_id)
 
-        if "reactions" not in msg or emoji_str not in msg["reactions"]:
-            return True
 
-        if user_id in msg["reactions"][emoji_str]:
-            msg["reactions"][emoji_str].remove(user_id)
-
-        if not msg["reactions"][emoji_str]:
-            del msg["reactions"][emoji_str]
-
-        if not msg["reactions"]:
-            del msg["reactions"]
-
-        cache["messages"][idx] = msg
-        _full_rewrite_messages(thread_id)
-
-    return True
+def remove_thread_reaction(thread_id: str, message_id: str, emoji: str, user_id: str) -> bool:
+    return remove_reaction_from_thread_message(thread_id, message_id, emoji, user_id)

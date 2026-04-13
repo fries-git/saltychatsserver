@@ -1,7 +1,7 @@
-import json, os, sys, asyncio, base64
+import json, os, asyncio, base64
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logger import Logger
 from db import push as push_db
 from handlers.websocket_utils import _get_ws_attr
@@ -21,6 +21,8 @@ def _derive_public_key_b64(private_key_path: str) -> str:
     from py_vapid import Vapid
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
     v = Vapid.from_file(private_key_path)
+    if v.public_key is None:
+        raise ValueError("Failed to load public key from VAPID key pair")
     raw = v.public_key.public_bytes(encoding=Encoding.X962, format=PublicFormat.UncompressedPoint)
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
@@ -120,7 +122,7 @@ def _do_send_push(username: str, title: str, body: str, extra_data: dict):
             Logger.error(f"[Push] Unexpected error for {sub['endpoint'][:40]}: {exc}")
 
 
-def send_push_notification(username: str, title: str, body: str, extra_data: dict = None):
+def send_push_notification(username: str, title: str, body: str, extra_data: Optional[dict] = None):
     if extra_data is None:
         extra_data = {}
     body = body[:120]

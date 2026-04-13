@@ -1,6 +1,6 @@
 # Command: webhook_create
 
-Create a new webhook for a text channel (owner only).
+Create a new webhook for a text channel. Requires `manage_server` permission.
 
 ## Request
 
@@ -41,16 +41,20 @@ The `token` field is only returned on creation. Store it securely as it won't be
 ## Error Responses
 
 - `{"cmd": "error", "src": "webhook_create", "val": "Authentication required"}`
-- `{"cmd": "error", "src": "webhook_create", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "src": "webhook_create", "val": "Access denied: manage_server permission required"}`
 - `{"cmd": "error", "src": "webhook_create", "val": "Channel is required"}`
 - `{"cmd": "error", "src": "webhook_create", "val": "Webhook name is required"}`
 - `{"cmd": "error", "src": "webhook_create", "val": "Channel not found"}`
 - `{"cmd": "error", "src": "webhook_create", "val": "Webhooks can only be created for text channels"}`
 - `{"cmd": "error", "src": "webhook_create", "val": "Failed to create webhook"}`
 
+## Permissions
+
+- Requires `manage_server` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Webhooks can only be created by users with the `manage_server` permission.
 - Webhooks can only be created for text channels.
 - The returned token should be stored securely - it's used to authenticate HTTP POST requests.
 - The webhook URL format is: `POST http://your-server/webhooks?token=<token>`

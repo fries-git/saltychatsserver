@@ -1,6 +1,6 @@
 # Command: emoji_update
 
-Update emoji metadata by ID (owner only).
+Update emoji metadata by ID. Requires `manage_server` permission.
 
 ## Request
 
@@ -34,13 +34,17 @@ Update emoji metadata by ID (owner only).
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_server permission required"}`
 - `{"cmd": "error", "val": "At least one field to update is required (name or image)"}`
 - `{"cmd": "error", "val": "Invalid emoji_update command scheme: ..."}` - When validation fails
 
+## Permissions
+
+- Requires `manage_server` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- Emojis can only be updated by users with the `manage_server` permission.
 - At least one of `name` or `image` must be provided.
 - The server maps `image` to the stored `fileName` metadata field.
 

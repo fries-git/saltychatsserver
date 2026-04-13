@@ -18,6 +18,15 @@ DEFAULT_CONFIG = {
         "uploads_per_minute": 10,
         "subscription_cache_ttl": 300,
         "max_attachments_per_user": -1,
+        "free_tier_max_expiration_days": 7,
+        "compression": {
+            "enabled": True,
+            "max_width": 1920,
+            "max_height": 1920,
+            "jpeg_quality": 85,
+            "webp_quality": 85,
+            "png_compression": 6,
+        },
     },
     "rate_limiting": {
         "enabled": True,
@@ -47,6 +56,10 @@ DEFAULT_CONFIG = {
         "owner": {
             "name": "Admin",
         },
+    },
+    "auth_mode": "rotur",
+    "cracked": {
+        "allow_registration": True,
     },
 }
 

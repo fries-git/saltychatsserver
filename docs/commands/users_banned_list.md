@@ -1,6 +1,6 @@
 # Command: users_banned_list
 
-List all banned users on the server (owner only).
+List all banned users on the server. Requires `manage_users` permission.
 
 ## Request
 
@@ -28,11 +28,15 @@ None.
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_users permission required"}`
+
+## Permissions
+
+- Requires `manage_users` permission.
 
 ## Notes
 
-- Requires `owner` role.
+- Banned users list can only be viewed by users with the `manage_users` permission.
 - Returns a list of usernames (not user IDs).
 - Banned users are those with the `banned` role.
 - Banned users cannot authenticate with the server.

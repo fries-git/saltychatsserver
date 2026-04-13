@@ -3,21 +3,27 @@ import json
 import os
 import secrets
 import threading
-from typing import Dict, Optional
-from . import roles
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import bcrypt
+from typing import Dict, Optional
+
+from . import roles
+from constants import ALLOWED_STATUSES
+
 from logger import Logger
 from config_store import get_config_value
-_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 users_index = os.path.join(_MODULE_DIR, "users.json")
-DEFAULT_USERS = {}
+
+DEFAULT_USERS: Dict[str, dict] = {}
 
 _lock = threading.RLock()
-
 _users_cache: Dict[str, dict] = {}
 _users_loaded: bool = False
+
+DEFAULT_STATUS = {"status": "online", "text": ""}
+
 
 def _load_users() -> Dict[str, dict]:
     global _users_cache, _users_loaded
@@ -29,57 +35,59 @@ def _load_users() -> Dict[str, dict]:
     _users_loaded = True
     return _users_cache
 
+
+def reload_users() -> Dict[str, dict]:
+    global _users_loaded
+    _users_loaded = False
+    return _load_users()
+
+
 def _save_users(users_dict: Dict[str, dict]) -> None:
     global _users_cache, _users_loaded
     tmp = users_index + ".tmp"
     with open(tmp, "w") as f:
-        json.dump(users_dict, f, indent=4)
+        json.dump(users_dict, f, indent=2)
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, users_index)
     _users_cache = users_dict
     _users_loaded = True
 
+
 def _get_users_cache() -> Dict[str, dict]:
     if not _users_loaded:
         _load_users()
     return _users_cache
+
 
 def _ensure_storage():
     os.makedirs(_MODULE_DIR, exist_ok=True)
     if not os.path.exists(users_index):
         tmp = users_index + ".tmp"
         with open(tmp, "w") as f:
-            json.dump(DEFAULT_USERS, f, indent=4)
+            json.dump(DEFAULT_USERS, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, users_index)
 
+
 _ensure_storage()
 
+
 def user_exists(user_id):
-    """
-    Check if a user exists in the users database.
-    """
     with _lock:
         return user_id in _get_users_cache()
 
+
 def get_user(user_id):
-    """
-    Get user data by user ID.
-    """
     with _lock:
         user = _get_users_cache().get(user_id)
         return copy.deepcopy(user) if user is not None else None
 
-def add_user(user_id, username=None):
-    """
-    Add a new user to the users database.
-    """
-    with _lock:
-        users = _get_users_cache()
 
-        if user_id in users:
+def add_user(user_id, username=None, default_roles=None):
+    with _lock:
+        if user_exists(user_id):
             return False
 
         user_data = get_config_value("DB", "users", "default", default={}).copy()
@@ -89,15 +97,20 @@ def add_user(user_id, username=None):
         elif "username" not in user_data:
             user_data["username"] = user_id
 
-        new_users = dict(users)
-        new_users[user_id] = user_data
-        _save_users(new_users)
-    return True
+        if default_roles:
+            user_data["roles"] = default_roles
+        elif "roles" not in user_data:
+            user_data["roles"] = []
+        if "status" not in user_data:
+            user_data["status"] = DEFAULT_STATUS
+
+        users = _get_users_cache()
+        users[user_id] = user_data
+        _save_users(users)
+        return True
+
 
 def get_user_roles(user_id):
-    """
-    Get the roles of a user.
-    """
     user = get_user(user_id)
     if user:
         return user.get("roles", [])
@@ -105,154 +118,137 @@ def get_user_roles(user_id):
 
 
 def get_users():
-    """
-    Get all users from the users database.
-    """
     with _lock:
         users = _get_users_cache()
-
         user_arr = []
+
         for user_id, user_data in users.items():
             if "banned" in user_data.get("roles", []):
                 continue
 
             user_roles = user_data.get("roles", [])
-            color = None
-            if user_roles:
-                first_role_name = user_roles[0]
-                first_role_data = roles.get_role(first_role_name)
-                if first_role_data:
-                    color = first_role_data.get("color")
+            color = roles.get_user_color(user_roles)
 
-            user_status = get_status(user_id)
-
+            user_status = user_data.get("status", DEFAULT_STATUS)
             username = user_data.get("username", user_id)
             nickname = user_data.get("nickname")
-            user_arr.append({
-                "username": username,
-                "nickname": nickname,
-                "roles": list(user_roles),
-                "color": color,
-                "status": user_status
-            })
-    return user_arr
+            pfp_url = user_data.get("pfp_url")
+            is_cracked = user_id.startswith(CRACKED_USER_PREFIX)
+
+            user_arr.append(
+                {
+                    "username": username,
+                    "nickname": nickname,
+                    "roles": list(user_roles),
+                    "color": color,
+                    "status": user_status,
+                    "cracked": is_cracked,
+                    "pfp": pfp_url,
+                }
+            )
+
+        return user_arr
+
+
+def count_users() -> int:
+    with _lock:
+        return len(_get_users_cache())
+
 
 def save_user(user_id, user_data):
-    """
-    Save user data to the users database.
-    """
     with _lock:
-        new_users = dict(_get_users_cache())
-        new_users[user_id] = user_data
-        _save_users(new_users)
+        users = _get_users_cache()
+        if user_id not in users:
+            return False
+        users[user_id] = user_data
+        _save_users(users)
+        return True
+
 
 def get_banned_users():
-    """
-    Get a list of all banned users.
-    """
     with _lock:
         users = _get_users_cache()
         banned = []
         for user_id, user_data in users.items():
             if "banned" in user_data.get("roles", []):
-                username = user_data.get("username", user_id)
-                banned.append(username)
-    return banned
+                banned.append(user_data.get("username", user_id))
+        return banned
+
 
 def is_user_banned(user_id):
-    """
-    Check if a user is banned by checking if they have the 'banned' role.
-    """
     user = get_user(user_id)
-    if user and "banned" in user.get("roles", []):
-        return True
-    return False
+    return user and "banned" in user.get("roles", [])
+
 
 def ban_user(user_id):
-    """
-    Ban a user by giving them the 'banned' role.
-    """
     with _lock:
-        user = get_user(user_id)
-        if user and "banned" not in user.get("roles", []):
-            user["roles"].insert(0, "banned")
-            save_user(user_id, user)
+        users = _get_users_cache()
+        if user_id in users and "banned" not in users[user_id].get("roles", []):
+            users[user_id].setdefault("roles", []).insert(0, "banned")
+            _save_users(users)
             return True
-    return False
+        return False
+
 
 def unban_user(user_id):
-    """
-    Unban a user by removing the 'banned' role.
-    """
     with _lock:
-        user = get_user(user_id)
-        if user and "banned" in user["roles"]:
-            user["roles"].remove("banned")
-            save_user(user_id, user)
+        users = _get_users_cache()
+        if user_id in users and "banned" in users[user_id].get("roles", []):
+            users[user_id]["roles"].remove("banned")
+            _save_users(users)
             return True
-    return False
+        return False
+
 
 def give_role(user_id, role):
-    """
-    Give a user a role.
-    """
     with _lock:
-        user = get_user(user_id)
-        if user:
-            user["roles"].insert(0, role)
-            save_user(user_id, user)
+        users = _get_users_cache()
+        if user_id in users:
+            users[user_id].setdefault("roles", []).append(role)
+            _save_users(users)
             return True
         return False
 
-def set_user_roles(user_id, roles):
-    """
-    Set the exact roles for a user.
 
-    Args:
-        user_id (str): The ID of the user.
-        roles (list): A list of roles to set as the user's roles.
-
-    Returns:
-        bool: True if roles were set successfully, False otherwise.
-    """
+def set_user_roles(user_id, roles_list):
     with _lock:
-        user = get_user(user_id)
-        if user:
-            user["roles"] = roles
-            save_user(user_id, user)
+        users = _get_users_cache()
+        if user_id in users:
+            users[user_id]["roles"] = roles_list
+            _save_users(users)
             return True
         return False
+
 
 def remove_role(user_id, role):
-    """
-    Remove a role from a user.
-    """
     with _lock:
-        user = get_user(user_id)
-        if user:
-            if role in user["roles"]:
-                user["roles"].remove(role)
-                save_user(user_id, user)
-                return True
-    return False
+        users = _get_users_cache()
+        if user_id in users and role in users[user_id].get("roles", []):
+            users[user_id]["roles"].remove(role)
+            _save_users(users)
+            return True
+        return False
+
+
+def remove_role_from_all_users(role):
+    with _lock:
+        users = _get_users_cache()
+        changed = False
+        for user_id, user_data in users.items():
+            if role in user_data.get("roles", []):
+                users[user_id]["roles"].remove(role)
+                changed = True
+        if changed:
+            _save_users(users)
+
 
 def remove_user_roles(user_id, roles_to_remove):
-    """
-    Remove multiple roles from a user.
-
-    Args:
-        user_id (str): The ID of the user.
-        roles_to_remove (list): A list of roles to remove.
-
-    Returns:
-        bool: True if at least one role was removed, False otherwise.
-    """
     with _lock:
-        user = get_user(user_id)
-        if not user:
+        users = _get_users_cache()
+        if user_id not in users:
             return False
 
-        current_roles = user.get("roles", [])
+        current_roles = users[user_id].get("roles", [])
         removed_any = False
 
         for role in roles_to_remove:
@@ -261,109 +257,67 @@ def remove_user_roles(user_id, roles_to_remove):
                 removed_any = True
 
         if removed_any:
-            user["roles"] = current_roles
-            save_user(user_id, user)
+            users[user_id]["roles"] = current_roles
+            _save_users(users)
             return True
 
-    return False
+        return False
+
 
 def remove_user(user_id):
-    """
-    Remove a user from the users database.
-    """
     with _lock:
         users = _get_users_cache()
-        if user_id not in users:
-            return False
-        new_users = dict(users)
-        new_users.pop(user_id, None)
-        _save_users(new_users)
-    return True
+        if user_id in users:
+            del users[user_id]
+            _save_users(users)
+            return True
+        return False
+
 
 def get_id_by_username(username):
-    """
-    Get a user's ID by their username.
-    """
     with _lock:
         users = _get_users_cache()
-        username_lower = username.lower()
         for user_id, user_data in users.items():
-            if user_data.get("username", "").lower() == username_lower:
+            if user_data.get("username", "").lower() == username.lower():
                 return user_id
-    return None
+        return None
+
 
 def get_username_by_id(user_id):
-    """
-    Get a user's username by their ID.
-    """
     user = get_user(user_id)
     if user:
-        result = user.get("username", "")
-        if not result:
-            return user_id
-        return result
+        return user.get("username") or user_id
     return user_id
 
 
 def update_user_username(user_id, new_username):
-    """
-    Update a user's username. This handles username changes.
-    """
     with _lock:
-        user = get_user(user_id)
-        if user:
-            user["username"] = new_username
-            save_user(user_id, user)
+        users = _get_users_cache()
+        if user_id in users:
+            users[user_id]["username"] = new_username
+            _save_users(users)
             return True
-    return False
+        return False
+
 
 def generate_validator(user_id):
-    """
-    Generate a new random validator token for a user and store it.
-    Called every time a user connects so they always receive a fresh token.
-
-    Args:
-        user_id (str): The ID of the user.
-
-    Returns:
-        str: The generated validator token, or None if the user does not exist.
-    """
     with _lock:
-        user = get_user(user_id)
-        if not user:
+        users = _get_users_cache()
+        if user_id not in users:
             return None
 
         validator = secrets.token_urlsafe(32)
-        user["validator"] = validator
-        save_user(user_id, user)
-    return validator
+        users[user_id]["validator"] = validator
+        _save_users(users)
+        return validator
+
 
 def get_validator(user_id):
-    """
-    Get the stored validator token for a user.
-
-    Args:
-        user_id (str): The ID of the user.
-
-    Returns:
-        str: The validator token, or None if the user or token does not exist.
-    """
     user = get_user(user_id)
-    if not user:
-        return None
-    return user.get("validator")
+    return user.get("validator") if user else None
 
 
 def get_user_id_by_validator(validator_token):
-    """
-    Get a user's ID by their validator token.
-
-    Args:
-        validator_token (str): The validator token to search for.
-
-    Returns:
-        str: The user ID, or None if not found.
-    """
     if not validator_token:
         return None
     with _lock:
@@ -371,119 +325,146 @@ def get_user_id_by_validator(validator_token):
         for user_id, user_data in users.items():
             if user_data.get("validator") == validator_token:
                 return user_id
-    return None
+        return None
 
 
 def get_usernames_by_role(role_name):
-    """
-    Get all usernames that have a specific role.
-
-    Args:
-        role_name (str): The name of the role to search for.
-
-    Returns:
-        list: A list of usernames that have the specified role.
-    """
     with _lock:
         users = _get_users_cache()
         usernames = []
         for user_id, user_data in users.items():
             if role_name in user_data.get("roles", []):
-                username = user_data.get("username", user_id)
-                usernames.append(username)
+                usernames.append(user_data.get("username", user_id))
         return usernames
 
 
 def set_nickname(user_id, nickname):
-    """
-    Set a user's display nickname.
-
-    Args:
-        user_id (str): The ID of the user.
-        nickname (str): The nickname to set.
-
-    Returns:
-        bool: True if successful, False if user not found.
-    """
     with _lock:
-        user = get_user(user_id)
-        if not user:
+        users = _get_users_cache()
+        if user_id not in users:
             return False
-        user["nickname"] = nickname
-        save_user(user_id, user)
+        users[user_id]["nickname"] = nickname
+        _save_users(users)
         return True
 
 
 def get_nickname(user_id):
-    """
-    Get a user's nickname.
-
-    Args:
-        user_id (str): The ID of the user.
-
-    Returns:
-        str or None: The nickname if set, None otherwise.
-    """
     user = get_user(user_id)
-    if user:
-        return user.get("nickname")
-    return None
+    return user.get("nickname") if user else None
 
 
 def clear_nickname(user_id):
-    """
-    Clear a user's nickname.
-
-    Args:
-        user_id (str): The ID of the user.
-
-    Returns:
-        bool: True if successful, False if user not found.
-    """
     with _lock:
-        user = get_user(user_id)
-        if not user:
+        users = _get_users_cache()
+        if user_id not in users:
             return False
-        if "nickname" in user:
-            del user["nickname"]
-            save_user(user_id, user)
+        if "nickname" in users[user_id]:
+            del users[user_id]["nickname"]
+            _save_users(users)
         return True
 
 
-ALLOWED_STATUSES = ["online", "idle", "dnd", "offline"]
-
-DEFAULT_STATUS = {
-    "status": "online",
-    "text": ""
-}
-
 def get_status(user_id) -> dict:
-    """
-    Get a user's status.
-
-    Args:
-        user_id (str): The ID of the user.
-
-    Returns:
-        str: The user's status, defaults to "online" if not set.
-    """
     user = get_user(user_id)
     if user:
         return user.get("status", DEFAULT_STATUS)
     return DEFAULT_STATUS
 
+
+CRACKED_USER_PREFIX = "USR:local_"
+
+
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_password(password: str, password_hash: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except Exception:
+        return False
+
+
+def register_cracked_user(
+    username: str, password: str, default_roles: list | None = None
+) -> tuple[bool, str | None, str | None]:
+    username = username.strip().lower()
+    if not username or len(username) < 2 or len(username) > 32:
+        return False, None, "Username must be 2-32 characters"
+    if not password or len(password) < 4 or len(password) > 72:
+        return False, None, "Password must be 4-72 characters"
+    if not username.replace("_", "").replace("-", "").isalnum():
+        return (
+            False,
+            None,
+            "Username can only contain letters, numbers, hyphens, and underscores",
+        )
+
+    user_id = f"{CRACKED_USER_PREFIX}{username}"
+    full_username = f"USR:local_{username}"
+
+    with _lock:
+        users = _get_users_cache()
+        if user_id in users:
+            return False, None, "Username already taken"
+
+        for existing_id, existing_data in users.items():
+            if existing_data.get("username", "").lower() == full_username.lower():
+                return False, None, "Username already taken"
+
+        password_hash = _hash_password(password)
+
+        user_data = {
+            "username": full_username,
+            "nickname": username,
+            "password_hash": password_hash,
+            "roles": default_roles or ["user"],
+            "status": DEFAULT_STATUS,
+            "pfp_url": None,
+        }
+        users[user_id] = user_data
+        _save_users(users)
+        return True, user_id, None
+
+
+def authenticate_cracked_user(
+    username: str, password: str
+) -> tuple[bool, str | None, str | None]:
+    username = username.strip().lower()
+    full_username = f"USR:local_{username}"
+
+    with _lock:
+        users = _get_users_cache()
+        for user_id, user_data in users.items():
+            if user_data.get("username", "").lower() == full_username.lower():
+                if user_id.startswith(CRACKED_USER_PREFIX):
+                    if _verify_password(password, user_data.get("password_hash", "")):
+                        return True, user_id, None
+                    return False, None, "Invalid password"
+                return False, None, "This account uses Rotur authentication"
+        return False, None, "User not found"
+
+
+def set_pfp(user_id: str, pfp_url: str) -> bool:
+    with _lock:
+        users = _get_users_cache()
+        if user_id not in users:
+            return False
+        users[user_id]["pfp_url"] = pfp_url
+        _save_users(users)
+        return True
+
+
+def get_pfp(user_id: str) -> Optional[str]:
+    user = get_user(user_id)
+    return user.get("pfp_url") if user else None
+
+
+def is_cracked_user(user_id: str) -> bool:
+    return user_id.startswith(CRACKED_USER_PREFIX) if user_id else False
+
+
 def set_status(user_id, status, text=None):
-    """
-    Set a user's status.
-
-    Args:
-        user_id (str): The ID of the user.
-        status (str): The status to set. Must be one of: online, idle, dnd, offline.
-        text (str, optional): A custom status message (max 100 characters).
-
-    Returns:
-        bool: True if successful, False if user not found or invalid status.
-    """
     if status not in ALLOWED_STATUSES:
         return False
 
@@ -491,12 +472,11 @@ def set_status(user_id, status, text=None):
         return False
 
     with _lock:
-        user = get_user(user_id)
-        if not user:
+        users = _get_users_cache()
+        if user_id not in users:
             return False
-        user["status"] = {
-            "status": status,
-            "text": text[:100] if text else ""
-        }
-        save_user(user_id, user)
+
+        status_data = {"status": status, "text": text[:100] if text else ""}
+        users[user_id]["status"] = status_data
+        _save_users(users)
         return True

@@ -1,14 +1,14 @@
 from db import channels, webhooks as webhooks_db
-from handlers.messages.helpers import _error, _require_user_id, _require_user_roles
+from handlers.messages.helpers import _error, _require_user_id, _require_permission
 import copy
 import uuid
 
 
-def handle_webhook_create(ws, message, match_cmd):
+async def handle_webhook_create(ws, message, match_cmd):
     user_id, error = _require_user_id(ws, "Authentication required")
     if not user_id or error:
         return error
-    user_roles, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_server", match_cmd)
     if error:
         return error
 
@@ -36,7 +36,7 @@ def handle_webhook_create(ws, message, match_cmd):
     return {"cmd": "webhook_create", "webhook": display_webhook}
 
 
-def handle_webhook_get(ws, message, match_cmd):
+async def handle_webhook_get(ws, message, match_cmd):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
@@ -55,7 +55,7 @@ def handle_webhook_get(ws, message, match_cmd):
     return {"cmd": "webhook_get", "webhook": webhook}
 
 
-def handle_webhook_list(ws, message, match_cmd):
+async def handle_webhook_list(ws, message, match_cmd):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
@@ -72,11 +72,11 @@ def handle_webhook_list(ws, message, match_cmd):
     return {"cmd": "webhook_list", "webhooks": webhooks_list}
 
 
-def handle_webhook_delete(ws, message, match_cmd):
+async def handle_webhook_delete(ws, message, match_cmd):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    user_roles, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_server", match_cmd)
     if error:
         return error
 
@@ -95,11 +95,11 @@ def handle_webhook_delete(ws, message, match_cmd):
     return {"cmd": "webhook_delete", "id": webhook_id, "deleted": True}
 
 
-def handle_webhook_update(ws, message, match_cmd):
+async def handle_webhook_update(ws, message, match_cmd):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    user_roles, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_server", match_cmd)
     if error:
         return error
 
@@ -130,11 +130,11 @@ def handle_webhook_update(ws, message, match_cmd):
     return {"cmd": "webhook_update", "webhook": updated_webhook}
 
 
-def handle_webhook_regenerate(ws, message, match_cmd):
+async def handle_webhook_regenerate(ws, message, match_cmd):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    user_roles, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_server", match_cmd)
     if error:
         return error
 
@@ -155,4 +155,3 @@ def handle_webhook_regenerate(ws, message, match_cmd):
     webhook_with_token = webhooks_db.get_webhook(webhook_id)
 
     return {"cmd": "webhook_regenerate", "webhook": webhook_with_token}
-    

@@ -1,6 +1,6 @@
 # Command: user_roles_get
 
-Get the roles assigned to a user (owner only).
+Get the roles assigned to a user. Requires `manage_users` permission.
 
 ## Request
 
@@ -30,13 +30,17 @@ Get the roles assigned to a user (owner only).
 ## Error Responses
 
 - `{"cmd": "error", "val": "Authentication required"}`
-- `{"cmd": "error", "val": "Access denied: owner role required"}`
+- `{"cmd": "error", "val": "Access denied: manage_users permission required"}`
 - `{"cmd": "error", "val": "User parameter is required"}`
 - `{"cmd": "error", "val": "User not found"}`
 
+## Permissions
+
+- Requires `manage_users` permission.
+
 ## Notes
 
-- Requires `owner` role.
+- User roles can only be viewed by users with the `manage_users` permission.
 - Usernames are case-insensitive for lookup.
 - Roles are returned in priority order (highest priority first).
 - The response includes the username as stored (with correct capitalization).

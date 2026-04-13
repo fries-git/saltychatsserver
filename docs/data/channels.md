@@ -6,21 +6,20 @@ A channel object represents a chat channel in OriginChats. Channels can be text,
 
 ```json
 {
-    "type": "text",
-    "name": "general",
-    "display_name": "General Chat",
-    "icon": "https://example.com/icon.png",
-    "description": "General chat channel for everyone",
-    "permissions": {
-        "view": ["user"],
-        "send": ["user"],
-        "delete": ["admin", "moderator"],
-        "delete_own": ["user"],
-        "edit_own": ["user"],
-        "pin": ["admin"],
-        "react": ["user"],
-        "create_thread": ["user"]
-    }
+  "type": "text",
+  "name": "general",
+  "display_name": "General Chat",
+  "description": "General chat channel for everyone",
+  "permissions": {
+    "view": ["user"],
+    "send": ["user"],
+    "delete": ["admin", "moderator"],
+    "delete_own": ["user"],
+    "edit_own": ["user"],
+    "pin": ["admin"],
+    "react": ["user"],
+    "create_thread": ["user"]
+  }
 }
 ```
 
@@ -28,9 +27,8 @@ A channel object represents a chat channel in OriginChats. Channels can be text,
 
 - `type`: Channel type. Can be `"text"`, `"voice"`, `"forum"`, or `"separator"`.
 - `name`: Channel name (string), used as unique identifier.
-- `display_name`: Display name for the channel. If present, this should be displayed instead of `name` in the UI.
-- `icon`: HTTP/HTTPS URL for the image displayed on a channel.
-- `description`: Description of the channel.
+- `display_name`: (optional) Display name for the channel. If present, this should be displayed instead of `name` in the UI.
+- `description`: (optional) Description of the channel.
 - `permissions`: Object with arrays of roles for each action.
     - `view`: Roles that can view/access the channel.
     - `send`: Roles that can send messages (text channels only).
@@ -105,24 +103,23 @@ Voice channels support audio communication via WebRTC:
 
 ```json
 {
-    "type": "voice",
-    "name": "lounge",
-    "display_name": "Chat Lounge",
-    "icon": "...",
-    "description": "Voice hangout",
-    "permissions": {
-        "view": ["user"]
+  "type": "voice",
+  "name": "lounge",
+  "display_name": "Chat Lounge",
+  "description": "Voice hangout",
+  "permissions": {
+    "view": ["user"]
+  },
+  "voice_state": [
+    {
+      "username": "alice",
+      "muted": false
     },
-    "voice_state": [
-        {
-            "username": "alice",
-            "muted": false
-        },
-        {
-            "username": "bob",
-            "muted": true
-        }
-    ]
+    {
+      "username": "bob",
+      "muted": true
+    }
+  ]
 }
 ```
 

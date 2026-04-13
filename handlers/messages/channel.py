@@ -1,5 +1,5 @@
-from db import channels, users
-from handlers.messages.helpers import _error, _require_user_id, _require_user_roles
+from db import channels, users, threads
+from handlers.messages.helpers import _error, _require_user_id, _require_permission
 
 
 def handle_channels_get(ws, message, match_cmd, server_data):
@@ -19,6 +19,7 @@ def handle_channels_get(ws, message, match_cmd, server_data):
                 msgs = channels.get_channel_messages(channel_name, 0, 1)
                 msg = msgs[0] if msgs else {}
                 channel["last_message"] = msg.get("timestamp")
+                channel["last_message_id"] = msg.get("id")
             elif channel.get("type") == "voice":
                 channel_name = channel.get("name")
                 participants = []
@@ -28,6 +29,15 @@ def handle_channels_get(ws, message, match_cmd, server_data):
                         "muted": data.get("muted", False)
                     })
                 channel["voice_state"] = participants
+            elif channel.get("type") == "forum":
+                channel_name = channel.get("name")
+                channel_threads = threads.get_channel_threads(channel_name)
+                for thread in channel_threads:
+                    if "participants" in thread:
+                        thread["participants"] = [users.get_username_by_id(pid) for pid in thread["participants"]]
+                    if "created_by" in thread:
+                        thread["created_by"] = users.get_username_by_id(thread["created_by"]) or thread["created_by"]
+                channel["threads"] = channel_threads
 
     return {"cmd": "channels_get", "val": channels_list}
 
@@ -36,7 +46,7 @@ def handle_channel_create(ws, message, match_cmd, server_data):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_channels", match_cmd)
     if error:
         return error
 
@@ -57,9 +67,9 @@ def handle_channel_create(ws, message, match_cmd, server_data):
         channel_name,
         channel_type,
         description=message.get("description"),
-        wallpaper=message.get("wallpaper"),
+        display_name=message.get("display_name"),
         permissions=message.get("permissions"),
-        size=message.get("size") if channel_type == "separator" else None
+        size=(message.get("size") or None) if channel_type == "separator" else None
     )
 
     if created:
@@ -77,7 +87,7 @@ def handle_channel_update(ws, message, match_cmd, server_data):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_channels", match_cmd)
     if error:
         return error
 
@@ -116,7 +126,7 @@ def handle_channel_move(ws, message, match_cmd, server_data):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_channels", match_cmd)
     if error:
         return error
 
@@ -146,7 +156,7 @@ def handle_channel_delete(ws, message, match_cmd, server_data):
     user_id, error = _require_user_id(ws, "Authentication required")
     if error:
         return error
-    _, error = _require_user_roles(user_id, requiredRoles=["owner"])
+    error = _require_permission(user_id, "manage_channels", match_cmd)
     if error:
         return error
 
